@@ -144,7 +144,7 @@ def main():
         summary_input = st.text_area(
             "Bio / Resume Summary",
             value=current_profile.summary,
-            rows=4,
+            height=120,
             help="Paste a short summary of your background, experience, or career goals."
         )
 
