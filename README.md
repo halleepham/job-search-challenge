@@ -1,7 +1,8 @@
 # CS 5542 Challenge 1 - Agentic AI Job Search & Profile Matching Application
 
 **Author:** Hallee Pham  
-**Branch:** `agent-exercise`
+**Branch:** `agent-exercise`  
+**Live Deployed Application:** [https://job-search-challenge-lkrzhcnfvijvqzheu3lbbx.streamlit.app/](https://job-search-challenge-lkrzhcnfvijvqzheu3lbbx.streamlit.app/)
 
 ---
 
@@ -67,7 +68,13 @@ job-search-challenge/
 
 ## 🚀 Setup & Running Instructions
 
-### 1. Prerequisites
+### 🌐 Live Hosted Web Application
+You can access and test the live application directly in your browser without local setup:  
+👉 **[https://job-search-challenge-lkrzhcnfvijvqzheu3lbbx.streamlit.app/](https://job-search-challenge-lkrzhcnfvijvqzheu3lbbx.streamlit.app/)**
+
+### 💻 Running Locally
+
+#### 1. Prerequisites
 - Python 3.10+ installed
 
 ### 2. Create Virtual Environment & Install Dependencies
