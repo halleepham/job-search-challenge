@@ -51,7 +51,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 | D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
 | D10 | **The cross-encoder is a pruner, not a scored component** | A cross-encoder score is an undecomposable relevance number. Including it in the match score would import an unexplainable term into the one artifact that must be explainable | Cross-encoder as a weighted score component (draft §6.5 evaluates it this way) |
 | D11 | **Python computes the score; the LLM only explains it** | Deterministic, reproducible, unit-testable. LLM-computed scores drift between runs | LLM-computed scores (retained separately as the prompt-engineering exercise, REQ-10) |
-| D12 | **Industry is dropped from the score** | Stage 1 gave it 0.10 of the manual score, but industry labels are inconsistent across sources and would add noise. Recorded as an explicit rejection, not an omission | Keeping the Stage 1 industry component |
+| D12 | **Industry is dropped from the score** | Scope, not data quality. Stage 1 gave it only 0.10 of the manual score, and the deadline does not allow a component that small to earn its implementation and test cost. **Correction (2026-09-08):** this decision was originally justified as "industry labels are inconsistent across sources" — the schema audit refuted that. `job_industries.csv` is 0% null on both columns and `mappings/industries.csv` carries 422 clean industry names. The data is good; the reason for dropping it is priority. Recorded as an explicit rejection, not an omission, and a strong candidate for report §12 future work | Keeping the Stage 1 industry component |
 
 ### 0.4 Architecture
 
@@ -172,13 +172,22 @@ Normalized job schema:
 **Acceptance Criteria:**
 
 - **AC-1.1** — The tech scoping stage joins `postings.csv` to `job_skills.csv` on `job_id` and
-  retains a posting if *either* its `skill_abr` set intersects `TECH_CODES` *or* its
-  `title_normalized` matches the tech title whitelist regex. `TECH_CODES` and the regex are
-  declared as named constants in one module, not inlined.
+  retains a posting if *either* its `skill_abr` set intersects
+  `TECH_CODES = {"IT", "ENG", "ANLS", "QA", "SCI"}` *or* its `title_normalized` matches the tech
+  title whitelist regex. `TECH_CODES` and the regex are declared as named constants in one module,
+  not inlined. `job_skills.csv` holds 213,768 rows for 126,807 distinct `job_id`s (1.69 codes per
+  job) and contains ids absent from `postings.csv`, so the join **must be a semi-join or be
+  deduplicated to one row per posting** — a naive inner join fans rows out. The code set alone
+  yields 33,502 postings (27% of the corpus); measured 2026-09-08.
 - **AC-1.2** — Given a fixture of 20 postings spanning tech and non-tech job functions, scoping
   retains exactly the tech ones. Non-tech postings that match the title regex (e.g. a
   "Sales Engineer") are retained; this is a deliberate recall-over-precision choice and is
-  asserted, not incidental.
+  asserted, not incidental. Measured: only ~55% of the `TECH_CODES` set has a software/data title
+  — `ENG` covers all engineering disciplines, so service technicians and construction project
+  managers survive scoping. This is acceptable because **AC-2.6 is the real precision filter**:
+  those postings match no gazetteer skill, extract zero skills, and are dropped. A consequence
+  worth stating plainly — the final corpus size is determined by gazetteer coverage, not by
+  `TECH_CODES`, and is not knowable until REQ-2 runs. Current estimate 18-25k.
 - **AC-1.3** — Deduplication is applied on `(title_normalized, company_normalized, location_normalized)`
   where all three are lowercased and whitespace-collapsed **before** comparison. The dropped row
   count is recorded in `coverage_stats.json`.
@@ -190,10 +199,20 @@ Normalized job schema:
   paths, so the report can state how much salary normalization the dataset had already done versus
   how much this pipeline added. There is exactly one rule per input case and no case falls through
   unhandled.
-- **AC-1.5** — `work_setting` is derived: `remote_allowed` true → `Remote`; else a word-boundary
-  match for "hybrid" in title or description → `Hybrid`; else, if the posting has a resolvable
-  physical location → `On-site`; else → `Unknown`. Every row where the value was derived rather
-  than read directly has `work_setting_inferred = True`.
+- **AC-1.5** — `work_setting` is derived: `remote_allowed == 1` → `Remote`; else a word-boundary
+  match for "hybrid" in title or description → `Hybrid`; else → `On-site`. Every row where the
+  value was derived rather than read directly has `work_setting_inferred = True`.
+  **`remote_allowed` is a sparse flag, not a nullable boolean** — measured 2026-09-08, it takes
+  exactly two values: `1.0` (15,246 rows) and null (108,603). Null therefore means "not flagged
+  remote", not "unknown", and must not route to `Unknown`. Doing so would place 87.7% of the
+  corpus in `Unknown`, which under AC-6.6's pass-and-tag policy makes the work-setting filter a
+  no-op. `Unknown` remains in the schema for the `data_jobs` corpus, which does not carry this
+  flag; for the LinkedIn corpus it is expected to be empty, and that is asserted.
+- **AC-1.6a** — `employment_type` comes from `formatted_work_type` (0% null; **not** `work_type`,
+  which is the same field unformatted). Measured distribution: Full-time 98,814 · Contract 12,117 ·
+  Part-time 9,696 · Temporary 1,190 · Internship 983 · Volunteer 562 · Other 487. The first five
+  are retained as the enum; `Volunteer` and `Other` are **excluded from the corpus** at ingestion
+  and their dropped count recorded, since neither is a job a user of this system is searching for.
 - **AC-1.6** — `min_years_exp` is set from a `(\d+)\+?\s*years?` regex over the description when
   one matches (`min_years_exp_source = "description_regex"`); otherwise from
   `formatted_experience_level` via the map {Internship: 0, Entry level: 0, Associate: 2,
@@ -252,9 +271,13 @@ canonical gazetteer terms.
   match "MongoDB"; "R" must match "R and Python" but not "R&D" or "HR". This is the single most
   important test in the suite — it is the exact defect in the Stage 2 AI code
   (`agent-exercise:src/matcher.py`, `match_skill_presence`).
-- **AC-2.3** — Extraction source precedence: when `skills_desc` is non-empty, gazetteer matches
-  found in it go to the **required** bucket. Independently, `description` is split into sections
-  and matched. The two results are unioned, with `required` winning any conflict.
+- **AC-2.3** — **`description` section-parsing is the primary extraction path** (AC-2.4);
+  `skills_desc` is a supplement applied only where present, and its gazetteer matches go to the
+  **required** bucket. The two results are unioned, with `required` winning any conflict.
+  This reverses the original drafting of this AC, which made `skills_desc` primary: it is
+  **98.0% null**, present on only ~2,500 of 123,849 postings (measured 2026-09-08). A design that
+  leaned on it would have extracted skills for 2% of the corpus. Because `skills_desc` covers so
+  little, no behavior may depend on its presence — it can only add skills, never gate them.
 - **AC-2.4** — Description section splitting uses heading regexes:
   `required|requirements|qualifications|must have|minimum qualifications|basic qualifications`
   opens a required section; `preferred|nice to have|bonus|a plus|desired|preferred qualifications`
@@ -267,7 +290,10 @@ canonical gazetteer terms.
   is 38% of the score, and a posting that cannot be scored on it cannot be ranked honestly.
 - **AC-2.7** — Extraction is measured, not assumed: `coverage_stats.json` reports the fraction of
   retained postings that have (a) a parsed required section, (b) a parsed preferred section,
-  (c) a non-empty `skills_desc`, and the median count of required skills per posting.
+  (c) a non-empty `skills_desc`, and the median count of required skills per posting. The
+  `skills_desc` figure is a reportable finding in its own right, not just a diagnostic: a
+  dedicated skills field that is 98% empty is a concrete Veracity example for report §5, and it
+  is why extraction from unstructured description text was necessary rather than optional.
 - **AC-2.8** — Alias normalization is applied before matching and is bidirectional-safe:
   `k8s`→`kubernetes`, `react.js`/`reactjs`→`react`, `ml`→`machine learning`. Aliases are data in the
   JSON artifact, not code.
@@ -321,7 +347,7 @@ Nothing else shares this page. It is the sole entry point for every input the pi
 | Preferred job titles | `st.multiselect` (accepts new options) | Yes | Seeded with common tech titles; free entry allowed |
 | Preferred location | `st.selectbox` with search | Conditional | Options come from the `geonamescache` city table — validated, not free text. Required unless work setting is Remote-only |
 | Work setting | Three `st.checkbox` | Yes | Remote / Hybrid / On-site. **All checked by default.** At least one must be checked |
-| Employment type | Four `st.checkbox` | Yes | Full-time / Part-time / Contract / Internship. **All checked by default.** At least one must be checked |
+| Employment type | Five `st.checkbox` | Yes | Full-time / Part-time / Contract / Internship / Temporary (per AC-1.6a). **All checked by default.** At least one must be checked |
 | Minimum salary | `st.number_input` | No | Integer, step 5000, default 0 (meaning no minimum) |
 | Include jobs with no listed salary | `st.checkbox` | — | **Checked by default.** Exposes the null-salary policy as a user choice rather than a hidden rule |
 | Maximum distance | `st.slider` | No | 10-250 miles, default 100. Disabled unless a location is set and Hybrid or On-site is checked. UI-layer control only — not a `UserProfile` data-model field |
@@ -835,6 +861,11 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | AC-1.1, AC-1.2 | Pinned `TECH_CODES = {IT, ENG, ANLS, QA, SCI}` (33,502 postings, 27%); required the join to semi-join/dedupe; recorded that the gazetteer, not `TECH_CODES`, sets final corpus size | Schema audit measured the code distribution and found `job_skills.csv` fans out at 1.69 rows/job. Only ~55% of the code set has a software/data title, but AC-2.6 drops the rest for having no gazetteer skills |
+| 2026-09-08 | AC-1.5 | `remote_allowed` null now means "not remote" rather than "unknown"; `Unknown` asserted empty for the LinkedIn corpus | Audit found the column is a sparse flag with exactly two values (1.0 / null), not a nullable boolean. Routing null to `Unknown` would put 87.7% of the corpus there and, under AC-6.6's pass-and-tag policy, turn the work-setting filter into a no-op |
+| 2026-09-08 | AC-1.6a (new), AC-3.3 | `formatted_work_type` has 7 values, not 4. Retained Full-time/Contract/Part-time/Temporary/Internship; excluded Volunteer and Other from the corpus; profile page gains a fifth checkbox | The enum was written from assumption. Volunteer and Other are not roles this system's users search for |
+| 2026-09-08 | AC-2.3, AC-2.7 | Reversed extraction precedence: `description` parsing is primary, `skills_desc` a supplement where present. Added `skills_desc` coverage to reported stats as a report finding | `skills_desc` is 98.0% null — present on ~2,500 of 123,849 postings. The original AC would have extracted skills for 2% of the corpus |
+| 2026-09-08 | D12 | Corrected the rationale for dropping industry from "labels are inconsistent" to "scope, not data quality" | The audit refuted the original justification: `job_industries.csv` is 0% null with 422 clean industry names. A wrong justification in a document the report cites is worse than none |
 | 2026-09-08 | D9, AC-1.10, AC-12.1, AC-13.4, Q3 | Processing engine changed from PySpark to DuckDB for offline ingestion and analytics; PySpark demoted to an optional engine-comparison in AC-13.4 | The corpus fits single-machine, so Spark added real setup cost (JDK 17 vs. the installed JDK 24, ~300MB package, JVM startup per run) for no performance gain. Report §5 lists SQL among acceptable technologies and grades the *justification*, not the tool. Measuring the crossover is a stronger result than asserting the choice. REQ-1 was still DRAFT |
 | 2026-09-08 | AC-1.4 | Salary normalization now prefers the dataset's existing `normalized_salary` column, with the pay_period derivation as fallback; added per-path row counts to coverage stats | User confirmed `postings.csv` carries `normalized_salary`. Reimplementing normalization the dataset already did would be wasted work and a worse veracity story than reporting how much was pre-normalized. REQ-1 was still DRAFT, so this is an amendment, not a post-freeze change |
 | 2026-09-08 | — | Initial draft | Written from the review of `docs/context/job-matching-application-plan.md` against `human-design.md` and `human-ai-codesign-prep.md`; decisions D1-D12 settled in discussion |
