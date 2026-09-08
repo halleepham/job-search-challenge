@@ -404,9 +404,12 @@ quoted. This is what lets explanations cite real sentences instead of templated 
 
 **Acceptance Criteria:**
 
-- **AC-4.1** — Chunking is by semantic section, not fixed token windows: one chunk each for
-  education, the skills block, each work-experience entry, each project, each credential block, and
-  the career-goals statement. A typical résumé yields 6-12 chunks.
+- **AC-4.1** — Chunking splits on blank lines (paragraph blocks), merging any block under 40
+  characters into its neighbour, plus one dedicated chunk for the career-goals statement. A typical
+  résumé yields 8-15 chunks. **Simplified 2026-09-08** from heading-driven semantic-section
+  detection: résumés are already visually blocked, so paragraph splitting lands on nearly the same
+  boundaries, while heading detection across arbitrary résumé formats is brittle and would have been
+  the largest source of edge cases in REQ-4 for no measurable retrieval gain.
 - **AC-4.2** — Each chunk carries metadata `{section, source, char_span}`. `char_span` indexes back
   into the original document so every displayed quote is provably verbatim source text (AC-11.5),
   never paraphrase.
@@ -443,10 +446,16 @@ All three are computed once and cached; recomputing on app start would make the 
 
 **Acceptance Criteria:**
 
-- **AC-5.1** — One dense vector per job, embedded from `title + required_skills + description`,
-  truncated to the model's 512-token maximum. Job descriptions are not chunked — one job is one
-  retrieval unit.
-- **AC-5.2** — The BM25 index (`rank_bm25`) is built over the same text and persisted.
+- **AC-5.1** — One dense vector per job, embedded from **`title + description`** — deliberately
+  **not** the skills list, which has its own score components (AC-9.12). Truncated to the model's
+  **256-token maximum** (measured on `all-MiniLM-L6-v2`, 2026-09-08; an earlier draft of this AC
+  said 512, which was wrong). `title` is placed first so the highest-signal text is always inside
+  the window. Job descriptions are not chunked — one job is one retrieval unit.
+- **AC-5.2** — The BM25 index (`rank_bm25`) is built over **`title + skills + description`** — the
+  full text, untruncated — and persisted. The two indexes deliberately cover different text: BM25
+  carries keyword precision on named tools over the whole posting, the dense vector carries meaning
+  over the opening. This is the division of labor that makes hybrid retrieval worth having, and it
+  is also what keeps the ~66-token content beyond the dense window still searchable.
 - **AC-5.3** — A `manifest.json` records the dataset row count, a content hash of the source Parquet,
   and the embedding model name. On app start, indexes are loaded from disk if the manifest matches
   the current corpus and model, and rebuilt only if it does not.
@@ -767,10 +776,14 @@ compliance*.
 
 **Acceptance Criteria:**
 
-- **AC-13.1** — **Retrieval comparison** over four configurations — BM25 only, dense only, hybrid RRF,
-  hybrid + cross-encoder pruning — reporting precision@10 against ~30 manually labeled (profile, job)
-  relevance judgments. Run on the **unfiltered** corpus, which is the honest way to compare retrieval
-  methods.
+- **AC-13.1** — **Retrieval comparison** over the configurations built — BM25 only, dense only,
+  hybrid RRF (plus cross-encoder pruning only if REQ-8 ships) — reporting precision@10 on the
+  **unfiltered** corpus, which is the honest way to compare retrieval methods.
+  **Judgments are pooled, not pre-labeled:** run every configuration for one profile, take the union
+  of their top-10s (typically 15-25 distinct jobs after overlap), and judge each job once as
+  relevant/not. Every configuration is then scored against that shared pool. This is both less
+  manual work than labeling a fixed set in advance and methodologically sounder — it cannot
+  under-credit a configuration for surfacing a good job nobody thought to label.
 - **AC-13.2** — **End-to-end evaluation** with filters enabled, reporting the top 5 for each of the
   three preset profiles from AC-3.7.
 - **AC-13.3** — **Latency**, measured per stage (filter, retrieve, prune, score, evidence) as median and
@@ -856,6 +869,9 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | AC-5.1, AC-5.2 | Dense vector now embeds `title + description` (skills excluded); BM25 indexes `title + skills + description` untruncated. Token limit corrected 512 → 256 | Two problems found when caching the model: the stated 512-token maximum was wrong (`all-MiniLM-L6-v2` is 256), and AC-5.1 contradicted AC-9.12 by embedding skills that already have their own score components. Splitting the two indexes resolves both at no cost and gives a better division of labor — the dense vector stops duplicating what BM25 does well |
+| 2026-09-08 | AC-4.1 | Résumé chunking simplified from heading-driven semantic sections to paragraph blocks | Scope trim against a 3-day deadline. Résumés are already visually blocked, so paragraph splits land on nearly the same boundaries; heading detection across arbitrary résumé formats is brittle and would have been REQ-4's largest source of edge cases for no measurable retrieval gain. Capability unchanged |
+| 2026-09-08 | AC-13.1 | Retrieval evaluation switched from ~30 pre-labeled pairs to pooled judgment over the union of configurations' top-10s | Less manual labeling *and* a sounder method — pooling cannot under-credit a configuration for surfacing a relevant job that was never in a pre-chosen label set |
 | 2026-09-08 | REQ-10 (removed), D11, AC-4.2, AC-9.10, AC-11.5, AC-13.3, AC-13.7 (removed), Non-Goals | Removed the hosted-LLM explanation layer entirely. D11 restated as "no LLM in the application; evidence is retrieved, not generated". Evidence display moved to AC-11.5, backed by REQ-4 retrieval and AC-4.2 character spans. Local HF generation noted as stretch | The co-design prep's "Practice with Agentic AI" was a prompt-engineering exercise, not a product requirement — the assignment asks an LLM's role to be explained only *if* one is used. Shipping it would have added an API key, a per-run cost, and a reproducibility barrier for prose, while the grounding it was supposed to provide already comes from semantic retrieval. No code had been written against REQ-10 |
 | 2026-09-08 | AC-1.1, AC-1.2 | Pinned `TECH_CODES = {IT, ENG, ANLS, QA, SCI}` (33,502 postings, 27%); required the join to semi-join/dedupe; recorded that the gazetteer, not `TECH_CODES`, sets final corpus size | Schema audit measured the code distribution and found `job_skills.csv` fans out at 1.69 rows/job. Only ~55% of the code set has a software/data title, but AC-2.6 drops the rest for having no gazetteer skills |
 | 2026-09-08 | AC-1.5 | `remote_allowed` null now means "not remote" rather than "unknown"; `Unknown` asserted empty for the LinkedIn corpus | Audit found the column is a sparse flag with exactly two values (1.0 / null), not a nullable boolean. Routing null to `Unknown` would put 87.7% of the corpus there and, under AC-6.6's pass-and-tag policy, turn the work-setting filter into a no-op |
