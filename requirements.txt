@@ -1,0 +1,34 @@
+# CS 5542 Challenge 1 — Job Search & Matching Application
+# Python 3.10 · no JVM required (DuckDB runs in-process)
+#
+# NOTE (AC-14.2): after the first successful install, regenerate exact pins with
+#   pip freeze > requirements.lock.txt
+# and commit that alongside this file.
+
+# --- Data ingestion & processing (REQ-1, REQ-12) ---
+duckdb==1.1.1
+pandas==2.2.3
+pyarrow==17.0.0
+kaggle==1.6.17
+datasets==3.0.1
+
+# --- Retrieval & matching (REQ-4, REQ-5, REQ-7, REQ-8, REQ-9) ---
+sentence-transformers==3.1.1
+faiss-cpu==1.8.0.post1
+rank-bm25==0.2.2
+geonamescache==2.0.0
+
+# --- Document parsing (REQ-3, REQ-4) ---
+pypdf==5.0.1
+
+# --- Application & visualization (REQ-3, REQ-11, REQ-12) ---
+streamlit==1.39.0
+plotly==5.24.1
+
+# --- Explanation layer (REQ-10) — optional at runtime, see AC-10.6 ---
+anthropic>=0.40.0
+python-dotenv==1.0.1
+
+# --- Testing & notebooks (REQ-13) ---
+pytest==8.3.3
+jupyter==1.1.1

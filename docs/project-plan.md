@@ -1,0 +1,840 @@
+# Project Spec: Job Search & Matching Application
+
+**Course:** CS 5542 Big Data Analytics and Applications — Challenge 1, Stage 3 (Human-AI Co-Design)
+**Author:** Hallee Pham
+**Branch:** `human-ai-codesign`
+
+**Status:** DRAFT — no section frozen yet.
+<!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
+
+**Last updated:** 2026-09-08
+
+---
+
+## 0. Purpose and scope of this document
+
+This is the authoritative specification for the Stage 3 system. It supersedes
+`docs/context/job-matching-application-plan.md`, which was an unvetted draft used as input.
+Where this spec differs from that draft, the difference is deliberate and recorded in §0.3.
+
+Code and tests reference the `REQ-n` / `AC-n.m` identifiers below directly. Commits reference
+the REQ they implement. No code is written against a section still marked DRAFT.
+
+### 0.1 What the system does
+
+A job seeker enters a profile — career documents plus structured preferences — and receives the
+top 5 matching job postings from a corpus of real tech job listings, each with a 0-100 match score,
+a decomposed breakdown of how that score was produced, the matched and missing skills, and a
+grounded natural-language explanation of why the job sits at its rank.
+
+### 0.2 Traceability to the assignment
+
+Every REQ carries a **Traces to** line pointing at a section of
+`docs/context/challenge-1-report-instructions.md`. A requirement that traces to nothing does not
+belong in this spec.
+
+### 0.3 Design decisions and rationale
+
+These were settled in review before drafting. They are recorded here because several of them
+reverse the draft plan or the Stage 1 human design, and the report (Section 4) must cite them.
+
+| # | Decision | Rationale | Rejected alternative |
+|---|---|---|---|
+| D1 | **LinkedIn Job Postings is the primary dataset**; `data_jobs` is the scale-test corpus and the seed for the skill vocabulary | LinkedIn requires real cleaning and skill extraction, which is directly graded (report §5). `data_jobs` ships pre-parsed skills, which would hand that work away | Using `data_jobs` as primary |
+| D2 | **Hard filters run BEFORE retrieval** | The draft ran filters after retrieving top-200. For a narrow profile (one metro or remote, salary floor, full-time) roughly 1-3% of a national corpus survives, leaving ~2-6 candidates — too few to rerank or rank. Filters are vectorized boolean masks over precomputed columns: milliseconds over 30k rows, not an expensive stage | Retrieve-then-filter (draft §3) |
+| D3 | **Corpus is scoped to tech roles** | The skill gazetteer is domain-bound; non-tech rows would extract zero skills and be dropped anyway. Scoping deliberately means the system's stated coverage matches its real coverage | Claiming general-purpose coverage |
+| D4 | **Skills are extracted from `skills_desc` and `description`, not from `job_skills.csv`** | `job_skills.csv` contains coarse job-function categories (`IT`, `ENG`, `ANLS`), not tool-level skills. It is unusable for matching — but it is exactly right for domain scoping (D3) | Trusting the dataset's skills column |
+| D5 | **Work setting and employment type are multi-select set-membership filters** | Equality forces a false choice on a user who would accept remote *or* hybrid. Set membership is the correct primitive | Exact equality (Stage 1 human design) |
+| D6 | **Education is graded, not gated, with an `in_progress` level** | A gate eliminates candidates who are mid-degree, and `education_required` is absent from most rows so a gate is either useless or destructive. `in_progress` models "finishing a master's" as 3.5 on the ladder | Hard eligibility gate (Stage 1 human design) |
+| D7 | **Experience is graded with an asymmetric curve** | Under-qualification is a screening barrier; over-qualification is a preference mismatch. The penalty is therefore gentler on the surplus side and floored well above zero | Symmetric penalty; no over-qualification handling (draft §8.1) |
+| D8 | **Semantic scores are calibrated against a fixed background distribution** | Pool-relative min-max makes every score depend on every other candidate, so adding one job reorders the top 5 and no acceptance criterion can assert a score value | Pool-relative min-max (draft §8.2); a fixed rescaling multiplier (Stage 2 AI code) |
+| D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
+| D10 | **The cross-encoder is a pruner, not a scored component** | A cross-encoder score is an undecomposable relevance number. Including it in the match score would import an unexplainable term into the one artifact that must be explainable | Cross-encoder as a weighted score component (draft §6.5 evaluates it this way) |
+| D11 | **Python computes the score; the LLM only explains it** | Deterministic, reproducible, unit-testable. LLM-computed scores drift between runs | LLM-computed scores (retained separately as the prompt-engineering exercise, REQ-10) |
+| D12 | **Industry is dropped from the score** | Stage 1 gave it 0.10 of the manual score, but industry labels are inconsistent across sources and would add noise. Recorded as an explicit rejection, not an omission | Keeping the Stage 1 industry component |
+
+### 0.4 Architecture
+
+```
+  RAW                          OFFLINE (DuckDB, run once)                     PERSISTED
+  ─────                        ───────────────────────────                    ─────────
+  postings.csv (124k) ─┐
+  job_skills.csv       ├─ join ─→ scope to tech (D3,D4) ─→ dedupe ─→ normalize
+  companies.csv       ─┘            ~30k rows              salary / work setting /
+                                                           experience / education
+                                                                  │
+                                    skill extraction ←────────────┤
+                                    (gazetteer, REQ-2)            │
+                                                                  ▼
+  data_jobs (786k) ────→ skill vocabulary seed          jobs_tech.parquet
+         │                                              coverage_stats.json
+         └──────────────→ scale test (REQ-13)           analytics/*.csv
+
+                                 INDEX BUILD (run once, cached)
+                                 ──────────────────────────────
+                       jobs_tech.parquet ─→ dense embeddings (.npy + FAISS)
+                                          ─→ BM25 index
+                                          ─→ calibration.json (p5/p95, D8)
+
+  ONLINE (pandas + Streamlit, per query)
+  ──────────────────────────────────────
+  Profile page (REQ-3) ─→ personal KB chunk+embed (REQ-4)
+         │
+         ▼
+  (1) HARD FILTERS   location · salary · work setting · employment type · skill floor   [D2]
+         │                                                              ~30k → ~N
+         ▼
+  (2) RETRIEVAL      BM25 + dense over survivors, fused with RRF → top 200
+         │
+         ▼
+  (3) PRUNE          cross-encoder → top 50                            [D10, stretch]
+         │
+         ▼
+  (4) SCORE          8-component weighted score, calibrated semantics  [D8]
+         │
+         ▼
+  (5) RANK → top 5 ─→ (6) EXPLAIN  LLM, grounded in retrieved résumé chunks  [D11]
+                              │
+                              ▼
+                     Results page (REQ-11) · Analytics page (REQ-12)
+```
+
+### 0.5 Repository layout and storage
+
+```
+data/
+├── raw/                     # gitignored — download instructions in README
+├── processed/
+│   ├── jobs_tech.parquet    # gitignored — serving corpus, regenerated by REQ-1
+│   ├── coverage_stats.json  # committed — field coverage measurements
+│   └── analytics/*.csv      # committed — small aggregation outputs for the report
+├── vocabulary/
+│   └── skills_vocabulary.json   # committed — curated gazetteer (REQ-2)
+└── index/                   # gitignored — FAISS index, BM25 pickle, calibration.json
+```
+
+Parquet is the processed format: columnar, compressed, preserves dtypes, and is the natural
+DuckDB output. Coverage stats and analytics outputs are committed because the report cites their
+numbers and a grader must be able to read them without running the pipeline.
+
+---
+
+## REQ-1: Job data ingestion and corpus construction
+
+**Status:** DRAFT
+**Traces to:** report §5 (Big Data Collection, Storage, and Processing), §1 (big data goal)
+**Tests:** `tests/test_req1_ingestion.py`
+
+**Description:**
+A DuckDB batch job that reads the raw LinkedIn dataset, scopes it to tech roles, deduplicates,
+normalizes every field the downstream system depends on, and writes a Parquet serving corpus plus
+a field-coverage report. Runs offline, once, and is fully reproducible from raw inputs.
+
+**Inputs:**
+`data/raw/postings.csv`, `data/raw/job_skills.csv`, `data/raw/job_industries.csv` (LinkedIn Job
+Postings, `kaggle.com/datasets/arshkon/linkedin-job-postings`, ~124k rows).
+
+**Outputs / Behavior:**
+`data/processed/jobs_tech.parquet` conforming to the normalized schema below, and
+`data/processed/coverage_stats.json` recording per-field non-null rates and row counts at every
+pipeline stage.
+
+Normalized job schema:
+
+```python
+{
+  "job_id": str,
+  "title": str,
+  "title_normalized": str,            # lowercased, seniority modifiers stripped
+  "company": str,
+  "location_raw": str,
+  "location_city": str | None,
+  "location_state": str | None,
+  "lat": float | None,
+  "lon": float | None,
+  "is_remote": bool,
+  "work_setting": str,                # Remote | Hybrid | On-site | Unknown
+  "work_setting_inferred": bool,
+  "employment_type": str,             # Full-time | Part-time | Contract | Internship | Unknown
+  "min_years_exp": float | None,
+  "min_years_exp_source": str,        # description_regex | seniority_label | none
+  "education_required": int | None,   # ordinal 1-5, see REQ-9
+  "salary_min": float | None,         # annual USD
+  "salary_max": float | None,
+  "salary_listed": bool,
+  "required_skills": list[str],       # REQ-2
+  "preferred_skills": list[str],      # REQ-2
+  "description": str,
+  "posted_date": date | None,
+}
+```
+
+**Acceptance Criteria:**
+
+- **AC-1.1** — The tech scoping stage joins `postings.csv` to `job_skills.csv` on `job_id` and
+  retains a posting if *either* its `skill_abr` set intersects `TECH_CODES` *or* its
+  `title_normalized` matches the tech title whitelist regex. `TECH_CODES` and the regex are
+  declared as named constants in one module, not inlined.
+- **AC-1.2** — Given a fixture of 20 postings spanning tech and non-tech job functions, scoping
+  retains exactly the tech ones. Non-tech postings that match the title regex (e.g. a
+  "Sales Engineer") are retained; this is a deliberate recall-over-precision choice and is
+  asserted, not incidental.
+- **AC-1.3** — Deduplication is applied on `(title_normalized, company_normalized, location_normalized)`
+  where all three are lowercased and whitespace-collapsed **before** comparison. The dropped row
+  count is recorded in `coverage_stats.json`.
+- **AC-1.4** — Salary uses the dataset's existing `normalized_salary` column as the authoritative
+  annual-USD value when it is non-null. When it is null, fall back to deriving from
+  `min_salary`/`max_salary` + `pay_period`: `HOURLY` x 2080, `MONTHLY` x 12, `YEARLY` passes through.
+  Any other or missing `pay_period` yields `salary_min = salary_max = None` and
+  `salary_listed = False`. `coverage_stats.json` reports how many rows came from each of the three
+  paths, so the report can state how much salary normalization the dataset had already done versus
+  how much this pipeline added. There is exactly one rule per input case and no case falls through
+  unhandled.
+- **AC-1.5** — `work_setting` is derived: `remote_allowed` true → `Remote`; else a word-boundary
+  match for "hybrid" in title or description → `Hybrid`; else, if the posting has a resolvable
+  physical location → `On-site`; else → `Unknown`. Every row where the value was derived rather
+  than read directly has `work_setting_inferred = True`.
+- **AC-1.6** — `min_years_exp` is set from a `(\d+)\+?\s*years?` regex over the description when
+  one matches (`min_years_exp_source = "description_regex"`); otherwise from
+  `formatted_experience_level` via the map {Internship: 0, Entry level: 0, Associate: 2,
+  Mid-Senior level: 5, Director: 8, Executive: 10} (`source = "seniority_label"`); otherwise
+  `None` (`source = "none"`). Regex takes precedence over the label when both are available.
+- **AC-1.7** — `education_required` is parsed from the description to an ordinal 1-5 by degree
+  keyword ("high school", "associate", "bachelor|BS|BA", "master|MS|MA|MBA", "PhD|doctorate").
+  When several appear, the **lowest** is taken, since a posting saying "Bachelor's required,
+  Master's preferred" requires a bachelor's. No match yields `None`.
+- **AC-1.8** — `coverage_stats.json` reports the non-null rate for `salary_min`,
+  `education_required`, `min_years_exp`, `work_setting` (excluding `Unknown`), and
+  `skills_desc`, plus row counts after each of: raw load, tech scoping, dedupe, zero-skill drop.
+  These numbers are cited directly in the report and must exist before REQ-9 weights are frozen.
+- **AC-1.9** — The job is idempotent: running it twice over the same raw inputs produces byte-identical
+  Parquet row counts and an identical `coverage_stats.json`.
+- **AC-1.10** — Every transformation in the job is a pure function over a row or DataFrame with no
+  reliance on engine-specific types in its signature. SQL handles the set-oriented work (join,
+  filter, dedupe, aggregate); Python pure functions handle per-row parsing (salary, work setting,
+  experience, education, skills), and those are unit-tested directly with no database connection.
+  This boundary is what keeps the engine choice reversible.
+
+**Notes / Open Questions:**
+DuckDB runs in-process with no server, no JVM, and no configuration. It reads the raw CSVs
+directly, so no separate load step is needed. Because AC-1.10 confines per-row logic to pure Python
+functions, swapping the set-oriented layer for pandas or PySpark later is a swap, not a rewrite —
+which is what makes the optional engine comparison in AC-13.4 cheap.
+
+---
+
+## REQ-2: Skill vocabulary and extraction
+
+**Status:** DRAFT
+**Traces to:** report §5 (skill extraction, feature construction), §6 (skill similarity)
+**Tests:** `tests/test_req2_skills.py`
+
+**Description:**
+A curated skill gazetteer plus a section-aware extractor that produces required and preferred
+skill lists for each posting. This is the highest-leverage preprocessing step in the system:
+it feeds the two largest score components and one hard filter.
+
+**Inputs:**
+`skills_desc` and `description` columns from REQ-1; `data/vocabulary/skills_vocabulary.json`.
+
+**Outputs / Behavior:**
+`required_skills: list[str]` and `preferred_skills: list[str]` per posting, both normalized to
+canonical gazetteer terms.
+
+**Acceptance Criteria:**
+
+- **AC-2.1** — The gazetteer is a committed JSON artifact mapping canonical skill names to alias
+  lists. It is seeded from the distinct values of the `data_jobs` `job_skills` column (a parsed
+  list column) and hand-extended with broad-tech terms not present in a data-roles vocabulary
+  (Java, Kubernetes, Terraform, React, Go, CI/CD, and similar). Target size ≥ 350 canonical terms.
+- **AC-2.2** — Skill matching is **word-boundary regex over normalized text, never substring**.
+  Test explicitly: "Java" must not match a description containing only "JavaScript"; "Go" must not
+  match "MongoDB"; "R" must match "R and Python" but not "R&D" or "HR". This is the single most
+  important test in the suite — it is the exact defect in the Stage 2 AI code
+  (`agent-exercise:src/matcher.py`, `match_skill_presence`).
+- **AC-2.3** — Extraction source precedence: when `skills_desc` is non-empty, gazetteer matches
+  found in it go to the **required** bucket. Independently, `description` is split into sections
+  and matched. The two results are unioned, with `required` winning any conflict.
+- **AC-2.4** — Description section splitting uses heading regexes:
+  `required|requirements|qualifications|must have|minimum qualifications|basic qualifications`
+  opens a required section; `preferred|nice to have|bonus|a plus|desired|preferred qualifications`
+  opens a preferred section. A section runs until the next recognized heading or end of text.
+- **AC-2.5** — When no preferred section is detected, `preferred_skills` is an **empty list** — not
+  a copy of required, and not a guess. The scorer's drop-and-renormalize rule (AC-9.4) then applies.
+  Preferred skills are never fabricated to fill the field.
+- **AC-2.6** — A posting yielding zero extracted skills is **dropped from the serving corpus** at
+  ingestion, and the dropped count is recorded in `coverage_stats.json`. Rationale: skill overlap
+  is 38% of the score, and a posting that cannot be scored on it cannot be ranked honestly.
+- **AC-2.7** — Extraction is measured, not assumed: `coverage_stats.json` reports the fraction of
+  retained postings that have (a) a parsed required section, (b) a parsed preferred section,
+  (c) a non-empty `skills_desc`, and the median count of required skills per posting.
+- **AC-2.8** — Alias normalization is applied before matching and is bidirectional-safe:
+  `k8s`→`kubernetes`, `react.js`/`reactjs`→`react`, `ml`→`machine learning`. Aliases are data in the
+  JSON artifact, not code.
+
+**Notes / Open Questions:**
+AC-2.7's measurement of preferred-section coverage directly determines whether the 8% preferred-skill
+weight in REQ-9 is defensible. If fewer than ~20% of postings yield a preferred section, that weight
+is buying almost nothing and REQ-9 should be revised through the spec-change protocol before freezing.
+
+---
+
+## REQ-3: Profile input page
+
+**Status:** DRAFT
+**Traces to:** report §1 (user inputs), §8 (final application)
+**Tests:** `tests/test_req3_profile.py` (validation logic only; widget rendering is not unit-tested)
+
+**Description:**
+A dedicated Streamlit page — the application's first page — where the user builds their profile.
+Nothing else shares this page. It is the sole entry point for every input the pipeline consumes.
+
+**Inputs:** User interaction.
+**Outputs / Behavior:** A validated `UserProfile` object held in `st.session_state`.
+
+**Page structure and exact controls.** The app is multi-page via Streamlit's `pages/` convention:
+`app.py` → `pages/1_Profile.py`, `pages/2_Results.py`, `pages/3_Analytics.py`.
+
+**Section A — Career documents** *(feeds the RAG knowledge base, REQ-4)*
+
+| Field | Widget | Required | Details |
+|---|---|---|---|
+| Résumé | `st.file_uploader` | Yes (or paste) | Accepts `.pdf`, `.txt`, `.md`. Single file |
+| Résumé (paste alternative) | `st.text_area` | — | Shown behind an "or paste instead" `st.toggle` |
+| Additional documents | `st.text_area` | No | Projects, coursework, certifications — free text |
+| Career goals statement | `st.text_area` | **Yes** | Free text, min 20 characters. Drives the semantic score |
+
+**Section B — Qualifications** *(structured; extracted from documents, always manually overridable)*
+
+| Field | Widget | Required | Details |
+|---|---|---|---|
+| Extract from résumé | `st.button` | — | Populates the three fields below; user may edit any result |
+| Skills | `st.multiselect` (accepts new options) | Yes | Options seeded from the REQ-2 gazetteer; free entry allowed |
+| Years of experience | `st.number_input` | Yes | Float, 0.0-50.0, step 0.5 |
+| Highest completed education | `st.selectbox` | Yes | High School / Associate / Bachelor's / Master's / PhD |
+| Currently pursuing | `st.selectbox` | No | Same ladder plus "Not currently enrolled" (default) |
+
+**Section C — Job preferences** *(drives hard filters, REQ-6)*
+
+| Field | Widget | Required | Details |
+|---|---|---|---|
+| Preferred job titles | `st.multiselect` (accepts new options) | Yes | Seeded with common tech titles; free entry allowed |
+| Preferred location | `st.selectbox` with search | Conditional | Options come from the `geonamescache` city table — validated, not free text. Required unless work setting is Remote-only |
+| Work setting | Three `st.checkbox` | Yes | Remote / Hybrid / On-site. **All checked by default.** At least one must be checked |
+| Employment type | Four `st.checkbox` | Yes | Full-time / Part-time / Contract / Internship. **All checked by default.** At least one must be checked |
+| Minimum salary | `st.number_input` | No | Integer, step 5000, default 0 (meaning no minimum) |
+| Include jobs with no listed salary | `st.checkbox` | — | **Checked by default.** Exposes the null-salary policy as a user choice rather than a hidden rule |
+| Maximum distance | `st.slider` | No | 10-250 miles, default 100. Disabled unless a location is set and Hybrid or On-site is checked. UI-layer control only — not a `UserProfile` data-model field |
+
+**Section D — Presets and actions**
+
+| Field | Widget | Details |
+|---|---|---|
+| Load a preset profile | `st.selectbox` | "Custom" (default) plus ≥3 built-in profiles. Populates every field above |
+| Find matches | `st.button` (primary) | Validates, builds `UserProfile`, navigates to Results |
+
+**Acceptance Criteria:**
+
+- **AC-3.1** — The profile page is a standalone page. No results, scores, or dataset analytics render
+  on it.
+- **AC-3.2** — Every field in the tables above exists with the specified widget type, default, and
+  required/optional status.
+- **AC-3.3** — Work setting and employment type are **sets**, not single values. Selecting Remote and
+  Hybrid together is valid and produces `accepted_work_settings = {"Remote", "Hybrid"}`.
+- **AC-3.4** — Validation blocks submission and shows a specific message when: no résumé is supplied
+  by either route; career goals is under 20 characters; skills is empty; work setting has zero boxes
+  checked; employment type has zero boxes checked; or location is empty while Hybrid or On-site is
+  checked. Each condition is independently unit-tested against the validation function.
+- **AC-3.5** — Location input is validated against the `geonamescache` city set. A value not in the
+  set cannot be submitted; the control offers matching cities as the user types.
+- **AC-3.6** — "Currently pursuing" defaults to "Not currently enrolled" and, when set, produces
+  `education_in_progress` on the profile, consumed by AC-9.6.
+- **AC-3.7** — At least three preset profiles ship, and at least one differs materially from the
+  author's own (different domain, seniority, and geography). Presets are what supply the
+  "top-5 for different profiles" evaluation in REQ-13.
+- **AC-3.8** — Résumé extraction is optional. Every field it populates remains editable, and the app
+  is fully usable with extraction never invoked.
+
+**Notes / Open Questions:**
+The maximum-distance slider is intentionally a UI filter rather than a profile field: the user enters
+a city and the system derives closeness. The slider only adjusts the cutoff applied to a distance the
+system computed itself.
+
+---
+
+## REQ-4: Personal knowledge base (RAG index)
+
+**Status:** DRAFT
+**Traces to:** report §6 (analytics and matching), §4 (co-design enhancements — RAG)
+**Tests:** `tests/test_req4_personal_kb.py`
+
+**Description:**
+Chunk, embed, and index the user's career documents so that per-job evidence can be retrieved and
+quoted. This is what lets explanations cite real sentences instead of templated summaries.
+
+**Inputs:** Résumé text, additional documents, career goals statement (REQ-3 Section A).
+**Outputs / Behavior:** A list of embedded chunks with metadata, held in session, plus a
+`retrieve(job_text, k)` function returning the top-k chunks by cosine similarity.
+
+**Acceptance Criteria:**
+
+- **AC-4.1** — Chunking is by semantic section, not fixed token windows: one chunk each for
+  education, the skills block, each work-experience entry, each project, each credential block, and
+  the career-goals statement. A typical résumé yields 6-12 chunks.
+- **AC-4.2** — Each chunk carries metadata `{section, source, char_span}`. `char_span` indexes back
+  into the original document so a quoted span can be verified as verbatim (AC-10.4).
+- **AC-4.3** — The embedding model is `sentence-transformers/all-MiniLM-L6-v2`, pinned by exact name
+  in one constants module and used for the personal KB, the job corpus, and the retrieval query.
+  Mixing embedding spaces is a correctness error, not a tuning choice.
+- **AC-4.4** — `retrieve(job_text, k)` returns exactly `min(k, n_chunks)` chunks ordered by
+  descending cosine similarity, each with its similarity score attached.
+- **AC-4.5** — Given a job description heavy in one skill area, retrieval returns the résumé chunk
+  covering that area ahead of unrelated chunks. Tested with a fixture résumé and two contrasting
+  job descriptions.
+- **AC-4.6** — Structured fields (skills, years, education) extracted from documents are stored on
+  the profile separately from the embedded chunks. The same text feeds both, but the structured and
+  unstructured paths never share a representation.
+
+**Notes / Open Questions:**
+The personal KB is tiny (tens of chunks), so exact search over a NumPy array is sufficient — no FAISS
+index is needed on this side.
+
+---
+
+## REQ-5: Job corpus indexing and calibration
+
+**Status:** DRAFT
+**Traces to:** report §5 (storage, indexing), §6 (embeddings, BM25)
+**Tests:** `tests/test_req5_indexing.py`
+
+**Description:**
+Build and persist the dense vector index, the BM25 index, and the semantic calibration constants.
+All three are computed once and cached; recomputing on app start would make the application unusable.
+
+**Inputs:** `data/processed/jobs_tech.parquet`.
+**Outputs / Behavior:** `data/index/{embeddings.npy, faiss.index, bm25.pkl, calibration.json, manifest.json}`.
+
+**Acceptance Criteria:**
+
+- **AC-5.1** — One dense vector per job, embedded from `title + required_skills + description`,
+  truncated to the model's 512-token maximum. Job descriptions are not chunked — one job is one
+  retrieval unit.
+- **AC-5.2** — The BM25 index (`rank_bm25`) is built over the same text and persisted.
+- **AC-5.3** — A `manifest.json` records the dataset row count, a content hash of the source Parquet,
+  and the embedding model name. On app start, indexes are loaded from disk if the manifest matches
+  the current corpus and model, and rebuilt only if it does not.
+- **AC-5.4** — Loading cached indexes for a 30k-row corpus completes in under 10 seconds.
+- **AC-5.5** — Calibration constants (D8) are computed at index-build time: sample 2,000 jobs from the
+  already-embedded corpus, compute cosine similarity against ≥3 reference profiles, and persist the
+  5th and 95th percentiles of the resulting distribution to `calibration.json`.
+- **AC-5.6** — At least one reference profile is materially unlike the author's own, so the background
+  distribution is not calibrated to a single person.
+- **AC-5.7** — Calibration uses only precomputed vectors — no additional embedding pass. Its build-time
+  cost is under 1 second and its query-time cost is one subtraction and one division per job.
+- **AC-5.8** — `calibration.json` is invalidated by the same manifest check as the indexes: changing
+  the corpus or the embedding model forces recomputation.
+
+---
+
+## REQ-6: Hard filters
+
+**Status:** DRAFT
+**Traces to:** report §6 (matching method), §4 (co-design — corrected AI's missing filter layer)
+**Tests:** `tests/test_req6_filters.py`
+
+**Description:**
+Non-negotiable constraints applied as vectorized boolean masks over the full serving corpus,
+**before** retrieval (D2). A job failing any filter is eliminated, not penalized.
+
+**Inputs:** `UserProfile`, the jobs DataFrame.
+**Outputs / Behavior:** A filtered DataFrame plus a per-filter survivor count (the funnel).
+
+**Acceptance Criteria:**
+
+- **AC-6.1** — Filters run before retrieval, over the whole corpus, as pandas boolean masks. Filtering
+  30k rows completes in under 200 ms.
+- **AC-6.2** — **Location.** Decision order: (a) if the user's accepted settings are Remote-only, a job
+  passes only if `is_remote`; (b) a job with `is_remote` true passes regardless of distance; (c)
+  otherwise, if both the user's city and the job's city geocode, pass when haversine distance ≤ the
+  distance cutoff; (d) if either fails to geocode, fall back to normalized city/state string equality;
+  (e) if that also fails, the job is dropped. All five branches are independently tested.
+- **AC-6.3** — Location normalization lowercases, trims, expands state names to codes (Missouri → MO),
+  and strips "metro", "area", and "greater" qualifiers before comparison.
+- **AC-6.4** — The geocoding resolution rate over the corpus is measured and recorded in
+  `coverage_stats.json`. The location filter is the most consequential one; its coverage is reported,
+  not assumed.
+- **AC-6.5** — **Salary.** A job passes when `salary_max >= user.min_salary`. A job with
+  `salary_listed == False` passes if and only if the user checked "include jobs with no listed salary",
+  and is tagged `salary_unverified` for display. When `min_salary == 0` the filter is a no-op.
+- **AC-6.6** — **Work setting.** A job passes when `job.work_setting ∈ user.accepted_work_settings`.
+  A job with `work_setting == "Unknown"` passes and is tagged `work_setting_unverified`, consistent
+  with the salary policy.
+- **AC-6.7** — **Employment type.** A job passes when `job.employment_type ∈ user.accepted_employment_types`.
+  `Unknown` passes and is tagged, same policy.
+- **AC-6.8** — **Skill floor.** A job passes when at least one of its `required_skills` is in the user's
+  normalized skill set. Because zero-skill postings were dropped at ingestion (AC-2.6), this filter
+  never encounters an empty required list.
+- **AC-6.9** — Filters compose with AND, and the function returns a funnel: the survivor count after
+  each individual filter. This is surfaced in the UI (AC-11.2) and cited in the report.
+- **AC-6.10** — When the funnel empties, the system reports which filter eliminated the most candidates
+  and suggests relaxing it. It never silently returns zero results.
+
+**Notes / Open Questions:**
+Location and work setting are deliberately separate filters composed with AND: location governs
+geography, work setting governs arrangement, and a remote job is exempt from the distance check.
+They must not double-gate.
+
+---
+
+## REQ-7: Hybrid retrieval
+
+**Status:** DRAFT
+**Traces to:** report §6 (BM25, embeddings, hybrid retrieval), §9 (retrieval comparison)
+**Tests:** `tests/test_req7_retrieval.py`
+
+**Description:**
+BM25 and dense retrieval run over the filter survivors and are fused with Reciprocal Rank Fusion into
+a single candidate list.
+
+**Inputs:** Filtered job set, `UserProfile`.
+**Outputs / Behavior:** Top-N candidate job IDs (N = 200, or all survivors if fewer).
+
+**Acceptance Criteria:**
+
+- **AC-7.1** — Three retrieval queries are issued separately — career-goals statement, skills list,
+  preferred titles — and all result lists are fused. They are not concatenated into one string, which
+  would dilute the dense query vector.
+- **AC-7.2** — Fusion is RRF: `score(doc) = Σ_retrievers 1 / (60 + rank_in_retriever)`. Raw BM25 scores
+  and cosine similarities are never summed — they live on incompatible scales.
+- **AC-7.3** — Each retriever is independently callable (`bm25_only`, `dense_only`, `hybrid`) so REQ-13
+  can compare them without reconstructing the pipeline.
+- **AC-7.4** — When the survivor set is smaller than N, all survivors are returned and no error is raised.
+- **AC-7.5** — Retrieval over a 30k-row corpus returns in under 2 seconds on CPU.
+
+---
+
+## REQ-8: Cross-encoder pruning
+
+**Status:** DRAFT — **stretch scope** (see Non-Goals)
+**Traces to:** report §4 (co-design enhancements), §9 (method comparison)
+**Tests:** `tests/test_req8_rerank.py`
+
+**Description:**
+A cross-encoder scores the (profile, job) pairs jointly and cuts the candidate list from 200 to 50.
+Its scores are used **only** to prune (D10); the final ordering is set entirely by REQ-9.
+
+**Acceptance Criteria:**
+
+- **AC-8.1** — `cross-encoder/ms-marco-MiniLM-L-6-v2` scores each candidate pair and the top 50 are
+  retained.
+- **AC-8.2** — Cross-encoder scores do not appear in the match score, in the component breakdown, or
+  anywhere in the UI. They are a pruning signal, not an explanation.
+- **AC-8.3** — The stage is toggleable by a single flag so REQ-13 can measure the pipeline with and
+  without it.
+- **AC-8.4** — Pruning 200 candidates completes in under 5 seconds on CPU.
+- **AC-8.5** — If measurement shows the stage does not change the final top 5, that is recorded as a
+  finding and the stage is disabled by default. A layer that does not earn its latency is removed,
+  not kept for appearances.
+
+---
+
+## REQ-9: Weighted match score
+
+**Status:** DRAFT
+**Traces to:** report §6 (combined score), §4 (corrections to AI scoring), §2 (Stage 1 lineage)
+**Tests:** `tests/test_req9_scoring.py`
+
+**Description:**
+Eight components, each normalized to [0,1], combined by fixed weights into a 0-100 score. Every
+component is a pure function over typed inputs, unit-testable without the app or any model.
+
+**Weights:**
+
+| Block | Component | Weight |
+|---|---|---:|
+| **Deterministic (70%)** | Required-skill overlap | 30% |
+| | Preferred-skill overlap | 8% |
+| | Experience alignment | 15% |
+| | Education alignment | 4% |
+| | Role/title match | 5% |
+| | Location proximity | 8% |
+| **Semantic (30%)** | Career goals ~ job description | 13% |
+| | Résumé evidence ~ job description | 17% |
+| | **Total** | **100%** |
+
+The 70/30 split follows Stage 1: deterministic components produce evidence that can be shown to the
+user directly, while semantic similarity is a supporting signal that cannot be pointed at. The 13/17
+semantic split is carried over from the Stage 2 co-design prep unchanged, so the lineage is traceable.
+
+**Acceptance Criteria:**
+
+- **AC-9.1** — Score = `round(Σ (sub_score × weight) × 100)`, an integer in [0, 100].
+- **AC-9.2** — Tier thresholds: Strong ≥ 80, Good 65-79, Moderate 45-64, Low < 45. (Retained from the
+  Stage 2 AI design — a "kept" item for report §4.)
+- **AC-9.3** — **Required-skill overlap** = `|matched_required| / |required|`, computed by exact set
+  membership on normalized canonical terms (AC-2.2). Substring matching is prohibited.
+- **AC-9.4** — **Preferred-skill overlap** = `|matched_preferred| / |preferred|`. When `preferred` is
+  empty, the component is **dropped and the remaining seven weights are renormalized to sum to 1.0**
+  for that job. It is never defaulted to 1.0 (inflates) or 0.0 (punishes a data gap).
+- **AC-9.5** — **Experience alignment**, asymmetric (D7), with `gap = job_min_years - user_years`:
+
+  ```
+  gap >  0   →  0.75                        if gap <= 1.0
+                0.50                        if gap <= 2.5
+                max(0.15, 0.50 - 0.10*gap)  otherwise
+  -3 <= gap <= 0  →  1.0                                       # plateau
+  gap < -3   →  max(0.60, 1.0 - 0.05 * (-gap - 3))             # over-qualified
+  job_min_years is None  →  0.5                                # neutral
+  ```
+
+  Each branch is independently tested, including the 0.60 floor and the neutral case.
+- **AC-9.6** — **Education alignment** (D6), on the ladder High School 1 < Associate 2 < Bachelor's 3
+  < Master's 4 < PhD 5:
+
+  ```
+  effective = (in_progress_level - 0.5) if in_progress else highest_completed
+
+  effective >= required            →  1.0
+  (required - effective) <= 1.0    →  0.6
+  otherwise                        →  0.2
+  education_required is None       →  0.5   # neutral
+  ```
+
+  Tested explicitly: a user pursuing a Master's (effective 3.5) scores 1.0 against a Bachelor's
+  requirement and 0.6 against a Master's requirement.
+- **AC-9.7** — **Role/title match** = token containment between the user's preferred titles and
+  `title_normalized`, after stripping seniority modifiers ("senior", "sr", "lead", "staff", "principal",
+  "junior", "jr", "I", "II", "III").
+- **AC-9.8** — **Location proximity**, reusing the distance computed in REQ-6:
+
+  ```
+  remote job, user accepts remote        →  1.0
+  distance resolved                      →  exp(-miles / 60)
+  unresolved, string match               →  0.8
+  unresolved, no string match            →  0.3
+  ```
+
+- **AC-9.9** — **Career goals ~ description** = calibrated cosine between the career-goals embedding
+  and the job embedding.
+- **AC-9.10** — **Résumé evidence ~ description** = calibrated maximum cosine over the retrieved
+  personal chunks for that job. The chunks producing this score are the same ones handed to REQ-10
+  as evidence.
+- **AC-9.11** — Calibration (D8) maps raw cosine through
+  `clip((raw - p5) / (p95 - p5), 0, 1)` using the persisted constants from AC-5.5. Scores do **not**
+  depend on the composition of the candidate set: adding an unrelated job to the pool changes no other
+  job's score. This is asserted directly by a test.
+- **AC-9.12** — No input signal feeds two components. The text embedded for the semantic components
+  excludes the skills list, which already has its own components.
+- **AC-9.13** — Every component has a defined behavior for missing input — drop-and-renormalize, or an
+  explicit neutral 0.5. No component silently defaults to 1.0.
+- **AC-9.14** — The scorer returns a full breakdown: each component's name, sub-score, weight, and
+  weighted contribution, with the contributions summing to the reported score.
+
+**Notes / Open Questions:**
+The 8% preferred-skill weight is provisional pending AC-2.7's coverage measurement, and the 13/17
+semantic split is provisional pending AC-13.6's correlation check. Both are revised through the
+spec-change protocol if the evidence says so — not silently in code.
+
+---
+
+## REQ-10: Grounded explanation layer
+
+**Status:** DRAFT
+**Traces to:** report §6 (LLM role), §4 (co-design enhancement over templated summaries)
+**Tests:** `tests/test_req10_explanations.py`
+
+**Description:**
+For each of the top 5 jobs, one LLM call produces an explanation grounded in verbatim résumé quotes.
+Python computes the score; the LLM narrates it (D11).
+
+**Acceptance Criteria:**
+
+- **AC-10.1** — The call receives the job's fields, the retrieved personal chunks, the computed
+  component breakdown, and the titles and scores of the jobs immediately above and below in the ranking.
+- **AC-10.2** — The LLM does **not** compute or alter the match score. The score displayed always comes
+  from REQ-9. If the model returns a score, it is ignored.
+- **AC-10.3** — Output is a structured schema — `{evidence: [{job_requirement, resume_quote}], missing:
+  [{item, type}], ranking_explanation}` — enforced by the SDK's structured-output mechanism, not by
+  asking for JSON in prose.
+- **AC-10.4** — **Grounding is verified in code, not trusted.** Every `resume_quote` returned is checked
+  against the source documents by exact substring match. A quote that does not appear verbatim is
+  dropped and its claimed skill is moved to `missing`. Tested with a profile that plainly lacks a
+  required skill: the system must not credit it.
+- **AC-10.5** — The profile block is placed in the cached prefix and the volatile job content after it,
+  so the identical profile across five calls is cached. `cache_read_input_tokens` is asserted non-zero
+  on calls after the first.
+- **AC-10.6** — Errors are caught most-specific-first and degrade gracefully: on any API failure the
+  card renders with its full component breakdown and matched/missing skills, and a notice that the
+  narrative explanation is unavailable. **The application is fully usable with no API key.**
+- **AC-10.7** — Example generated explanations are committed under `data/processed/` so a grader can see
+  the output without credentials (supports report §11).
+- **AC-10.8** — The prompt-engineering exercise from the co-design prep — the LLM scoring the job from
+  the fixed rubric — is implemented as a **separate, clearly-labeled comparison path**, not as the
+  production scorer. Its divergence from the Python score is reported in REQ-13.
+
+**Notes / Open Questions:**
+Exact SDK parameter names are pinned at implementation time against current documentation rather than
+frozen into this spec; the draft plan's example call used `cache_control` as a top-level parameter,
+which is not where it belongs.
+
+---
+
+## REQ-11: Results page
+
+**Status:** DRAFT
+**Traces to:** report §8 (final application), §1 (expected outputs)
+**Tests:** manual; screenshots are the deliverable
+
+**Description:**
+A dedicated page rendering the ranked top 5 with full score transparency.
+
+**Acceptance Criteria:**
+
+- **AC-11.1** — Top 5 jobs render as cards showing title, company, location, salary range (or an
+  "unlisted" badge), employment type, work setting (with an "inferred" badge where applicable), the
+  0-100 match score, and the tier badge.
+- **AC-11.2** — A funnel summary shows corpus size → survivors after each filter → candidates retrieved
+  → final 5. This makes the pipeline legible and is a report figure.
+- **AC-11.3** — Each card expands to a component breakdown table: component, sub-score, weight, weighted
+  contribution, with contributions summing to the displayed score. Renormalized weights (AC-9.4) are
+  shown as renormalized.
+- **AC-11.4** — Matched skills display with their supporting résumé quote; missing skills display
+  separately.
+- **AC-11.5** — The LLM explanation renders in the expanded card, or the AC-10.6 fallback notice does.
+- **AC-11.6** — A score-distribution chart across the returned results is shown.
+- **AC-11.7** — Every field collected on the profile page is either used by a filter or a score
+  component, or is not collected. No field is stored and then ignored — the exact defect in the Stage 2
+  AI code, where `education_level` and `min_salary` sat unused on `UserProfile`.
+
+---
+
+## REQ-12: Dataset analytics and visualization
+
+**Status:** DRAFT
+**Traces to:** report §7 (Big Data Analytics and Visualization — **required**), Minimum Visual Evidence #4
+**Tests:** `tests/test_req12_analytics.py` (aggregation correctness)
+
+**Description:**
+Descriptive analytics over the job corpus, computed as DuckDB aggregations and rendered on a dedicated page.
+This is analysis *of the dataset*, distinct from the *result-level* charts in REQ-11.
+
+**Acceptance Criteria:**
+
+- **AC-12.1** — Six aggregations are computed as DuckDB `GROUP BY` queries and written to `data/processed/analytics/`:
+  top 20 job titles; top 25 requested skills; geographic distribution by state; salary distribution
+  and median by title family; remote vs. hybrid vs. on-site counts; experience-level distribution;
+  top 20 hiring companies.
+- **AC-12.2** — The analytics page renders at least four of these as charts, with at least one
+  geographic and one salary visualization.
+- **AC-12.3** — A skill co-occurrence view shows which skills appear together most often — the finding
+  that makes the scoped tech corpus worth having.
+- **AC-12.4** — Aggregation outputs are committed as CSVs so the report can cite exact numbers without
+  a pipeline run.
+- **AC-12.5** — Each aggregation is unit-tested against a small fixture with hand-computed expected values.
+
+---
+
+## REQ-13: Evaluation notebook
+
+**Status:** DRAFT
+**Traces to:** report §9 (Results and Evaluation), §10 (comparison)
+**Location:** `notebooks/evaluation.ipynb`
+
+**Description:**
+Side-by-side evaluation of *method quality*, distinct from the AC-derived tests, which verify *spec
+compliance*.
+
+**Acceptance Criteria:**
+
+- **AC-13.1** — **Retrieval comparison** over four configurations — BM25 only, dense only, hybrid RRF,
+  hybrid + cross-encoder pruning — reporting precision@10 against ~30 manually labeled (profile, job)
+  relevance judgments. Run on the **unfiltered** corpus, which is the honest way to compare retrieval
+  methods.
+- **AC-13.2** — **End-to-end evaluation** with filters enabled, reporting the top 5 for each of the
+  three preset profiles from AC-3.7.
+- **AC-13.3** — **Latency**, measured per stage (filter, retrieve, prune, score, explain) as median and
+  p95 over ≥20 runs.
+- **AC-13.4** — **Scalability**: the ingestion job is timed over increasing corpus sizes — the ~30k
+  tech subset, the full ~124k LinkedIn corpus, and the ~786k-row `data_jobs` corpus — and plotted,
+  with peak memory recorded alongside wall-clock. This is where the Volume claim is actually
+  evidenced. **Optional extension (stretch):** a minimal PySpark implementation of the same
+  ingestion job, timed over the same three sizes, to locate the crossover point where distributed
+  execution starts to win. A measured engine comparison is a stronger report result than an
+  asserted tool choice.
+- **AC-13.5** — **Calibration evidence**: raw-cosine and calibrated-score histograms side by side,
+  demonstrating the correction of the Stage 2 magic-multiplier failure mode.
+- **AC-13.6** — **Component sensitivity**: each score component is zeroed in turn and the change in the
+  top 5 is reported, identifying components that cannot discriminate. Includes the correlation between
+  the two semantic components; if r > 0.8 they are double-counting one signal and REQ-9 is revised
+  through the spec-change protocol.
+- **AC-13.7** — **LLM vs. Python scoring** divergence from AC-10.8, with the largest disagreements
+  inspected — a sharp divergence usually indicates a real weakness in a sub-score formula.
+- **AC-13.8** — Every table and figure the report cites from this notebook is exported to
+  `notebooks/figures/`.
+
+---
+
+## REQ-14: Reproducibility and documentation
+
+**Status:** DRAFT
+**Traces to:** report §11 (GitHub and Reproducibility), §10 (comparison table)
+
+**Acceptance Criteria:**
+
+- **AC-14.1** — `README.md` independently explains the dataset, architecture, processing pipeline,
+  analytics, execution steps, and example results. A reader never opens this spec to understand what
+  was built.
+- **AC-14.2** — `requirements.txt` pins every dependency to an exact version.
+- **AC-14.3** — Raw data is not committed; the README gives exact download and placement instructions,
+  and the pipeline regenerates every processed artifact from raw.
+- **AC-14.4** — A single documented command runs ingestion end to end, and a second launches the app.
+- **AC-14.5** — The Human vs. AI vs. Human-AI comparison table (report §10) is generated with evidence
+  from `git diff human-ai-codesign agent-exercise -- src/`, citing specific files and line ranges rather
+  than characterizing the AI code from memory.
+- **AC-14.6** — Screenshots of the profile page, results page, and analytics page are committed under
+  `docs/screenshots/`.
+
+---
+
+## Non-Goals
+
+Explicitly out of scope for v1.0. The report's limitations section cites this list.
+
+**Cut entirely:**
+- Feedback / thumbs-up-down re-ranking loop. Session-weight adjustment was in the draft plan and is
+  deliberately dropped — it is ungraded, and a handful of thumbs cannot support weight learning.
+- GitHub repository ingestion into the knowledge base.
+- Three-way side-by-side job comparison and radar charts.
+- Company industry, posting recency, applicant count, equity/bonus, visa sponsorship, security
+  clearance as score components (D12).
+- Non-tech job domains (D3).
+- Live geocoding APIs; persisted cross-session state; user accounts; real-time job APIs.
+
+**Stretch — build only if the must-ship list is complete:**
+- REQ-8 cross-encoder pruning.
+- LLM-based résumé field extraction (manual entry is the guaranteed path).
+- A PySpark implementation of the ingestion job, for the engine-comparison timing in AC-13.4.
+- Lazy explanation generation below the top 5.
+
+**Must ship:** REQ-1 through REQ-7 and REQ-9 through REQ-14.
+
+---
+
+## Open Questions
+
+| # | Question | Blocks | Resolution path |
+|---|---|---|---|
+| Q1 | Does the preferred-skill weight of 8% survive AC-2.7's coverage measurement? | Freezing REQ-9 | Measure during REQ-2, revise REQ-9 via the spec-change protocol if coverage is under ~20% |
+| Q2 | Are the two semantic components measuring one signal? | Final weights | AC-13.6 correlation check |
+| Q3 | Where is the single-machine/distributed crossover for this workload? | Nothing — reporting only | AC-13.4's optional PySpark comparison, if time allows; otherwise stated as a documented limitation |
+| Q4 | Is the ~30k tech corpus large enough for the retrieval comparison to differentiate methods? | AC-13.1 interpretation | Comparison runs unfiltered; if differences are marginal, that is itself a reportable finding |
+
+---
+
+## Spec Changelog
+
+| Date | REQ/AC changed | What changed | Why |
+|---|---|---|---|
+| 2026-09-08 | D9, AC-1.10, AC-12.1, AC-13.4, Q3 | Processing engine changed from PySpark to DuckDB for offline ingestion and analytics; PySpark demoted to an optional engine-comparison in AC-13.4 | The corpus fits single-machine, so Spark added real setup cost (JDK 17 vs. the installed JDK 24, ~300MB package, JVM startup per run) for no performance gain. Report §5 lists SQL among acceptable technologies and grades the *justification*, not the tool. Measuring the crossover is a stronger result than asserting the choice. REQ-1 was still DRAFT |
+| 2026-09-08 | AC-1.4 | Salary normalization now prefers the dataset's existing `normalized_salary` column, with the pay_period derivation as fallback; added per-path row counts to coverage stats | User confirmed `postings.csv` carries `normalized_salary`. Reimplementing normalization the dataset already did would be wasted work and a worse veracity story than reporting how much was pre-normalized. REQ-1 was still DRAFT, so this is an amendment, not a post-freeze change |
+| 2026-09-08 | — | Initial draft | Written from the review of `docs/context/job-matching-application-plan.md` against `human-design.md` and `human-ai-codesign-prep.md`; decisions D1-D12 settled in discussion |
