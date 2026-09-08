@@ -377,3 +377,159 @@ def test_ac_1_6_v1_3_range_takes_lower_bound(text, expected):
     "years", overstating every ranged requirement.
     """
     assert parse_min_years(text, None)[0] == expected
+
+
+# ============================================================ PHASE 1c
+# AC-1.8 coverage stats · AC-1.9 idempotency · AC-1.10 engine boundary
+
+import json  # noqa: E402
+
+import pandas as pd  # noqa: E402
+
+from src.ingest import CORPUS_SCHEMA, build_corpus, normalize_fields  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def built(tmp_path_factory):
+    out = tmp_path_factory.mktemp("corpus")
+    return build_corpus(FIXTURES / "postings_sample.csv",
+                        FIXTURES / "job_skills_sample.csv",
+                        out_dir=out), out
+
+
+# ---------------------------------------------------------------- AC-1.8
+
+def test_ac_1_8_stats_file_written(built):
+    _, out = built
+    assert (out / "coverage_stats.json").exists()
+
+
+def test_ac_1_8_reports_required_coverage_rates(built):
+    """AC-1.8: non-null rates for the five named fields."""
+    (_, stats), _ = built
+    for field in ["salary_min", "education_required", "min_years_exp",
+                  "work_setting_known", "skills_desc"]:
+        assert field in stats["coverage_pct"], f"{field} missing from coverage_pct"
+        assert 0.0 <= stats["coverage_pct"][field] <= 100.0
+
+
+def test_ac_1_8_reports_funnel_counts(built):
+    """AC-1.8: row counts after each named stage."""
+    (_, stats), _ = built
+    f = stats["funnel"]
+    assert f["raw_load"] == 21
+    assert f["raw_load"] >= f["after_tech_scoping"] >= f["after_dedupe"] >= f["after_employment_filter"]
+    assert "after_zero_skill_drop" in f, "AC-2.6's stage must be present even before REQ-2 fills it"
+    assert f["after_zero_skill_drop"] is None, "unfilled until REQ-2 exists — not silently faked"
+
+
+def test_ac_1_8_reports_salary_path_counts(built):
+    """AC-1.4 amendment: how many rows took each of the three salary paths."""
+    (_, stats), _ = built
+    paths = stats["salary_source"]
+    assert set(paths) <= {"normalized_salary", "derived", "non_usd", "none"}
+    assert sum(paths.values()) == stats["funnel"]["after_employment_filter"]
+
+
+def test_ac_1_8_non_usd_is_counted_not_hidden(built):
+    """The fixture contains one EUR posting; it must appear as its own path."""
+    (_, stats), _ = built
+    assert stats["salary_source"].get("non_usd", 0) == 1
+
+
+# ---------------------------------------------------------------- AC-1.9
+
+def test_ac_1_9_idempotent(tmp_path):
+    """AC-1.9: two runs over the same inputs produce identical output."""
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    (df_a, stats_a) = build_corpus(FIXTURES / "postings_sample.csv",
+                                   FIXTURES / "job_skills_sample.csv", out_dir=a_dir)
+    (df_b, stats_b) = build_corpus(FIXTURES / "postings_sample.csv",
+                                   FIXTURES / "job_skills_sample.csv", out_dir=b_dir)
+    assert len(df_a) == len(df_b)
+    assert list(df_a["job_id"]) == list(df_b["job_id"])
+    assert stats_a == stats_b
+    assert json.loads((a_dir / "coverage_stats.json").read_text()) == \
+           json.loads((b_dir / "coverage_stats.json").read_text())
+
+
+def test_ac_1_9_parquet_roundtrips(built):
+    """The written Parquet reloads to the same rows the pipeline produced."""
+    (df, _), out = built
+    reloaded = pd.read_parquet(out / "jobs_tech.parquet")
+    assert len(reloaded) == len(df)
+    assert list(reloaded["job_id"]) == list(df["job_id"])
+
+
+def test_ac_1_9_schema_columns_present(built):
+    """Output conforms to REQ-1's normalized schema for the fields phase 1 owns."""
+    (df, _), _ = built
+    for col in CORPUS_SCHEMA:
+        assert col in df.columns, f"schema column {col} missing"
+
+
+def test_ac_1_9_no_excluded_employment_types(built):
+    """AC-1.6a: Volunteer (job 9) and Other (job 19) never reach the corpus."""
+    (df, _), _ = built
+    assert set(df["employment_type"]) <= {"Full-time", "Contract", "Part-time",
+                                          "Temporary", "Internship"}
+
+
+# ---------------------------------------------------------------- AC-1.10
+
+def test_ac_1_10_per_row_logic_needs_no_database():
+    """
+    AC-1.10: the engine boundary. Every per-row rule is a pure function callable
+    with no DuckDB connection, which is what keeps the engine choice (D9)
+    reversible.
+    """
+    assert normalize_salary(90000.0, None, None, "YEARLY", "USD")[2] is True
+    assert derive_work_setting(1.0, "t", "d")[0] == "Remote"
+    assert normalize_employment_type("Full-time") == "Full-time"
+    assert parse_min_years("5+ years", None)[0] == 5.0
+    assert parse_education("Bachelor's degree") == 3
+    assert normalize_title("Senior Data Engineer") == "data engineer"
+
+
+def test_ac_1_10_normalize_fields_is_dataframe_only():
+    """normalize_fields operates on a DataFrame — no connection, no SQL."""
+    df = pd.DataFrame([{
+        "title": "Data Engineer", "description": "3 years. Bachelor's degree.",
+        "formatted_work_type": "Full-time", "formatted_experience_level": "Associate",
+        "remote_allowed": None, "normalized_salary": 100000.0, "min_salary": None,
+        "max_salary": None, "pay_period": "YEARLY", "currency": "USD",
+    }])
+    out, stats = normalize_fields(df)
+    assert len(out) == 1
+    assert out.iloc[0]["salary_listed"] and out.iloc[0]["education_required"] == 3
+
+
+@pytest.mark.parametrize("smin,smax", [
+    (float("nan"), float("nan")), (float("nan"), 120000.0), (100000.0, float("nan")),
+])
+def test_ac_1_4_nan_range_falls_back_to_normalized(smin, smax):
+    """
+    Regression: pandas yields NaN, not None, for a missing numeric cell, and
+    `NaN is not None` is True. The original guard let NaN into the range branch
+    and returned NaN * multiplier — 999 real rows came out salary_listed=True
+    with a null salary, which AC-6.5's `salary_max >= min_salary` filter would
+    then read as underpaying and drop.
+    """
+    lo, hi, listed, src = normalize_salary(95000.0, smin, smax, "YEARLY", "USD")
+    assert (lo, hi, listed, src) == (95000.0, 95000.0, True, "normalized_salary")
+
+
+def test_ac_1_4_nan_with_no_normalized_is_unlisted():
+    assert normalize_salary(float("nan"), float("nan"), float("nan"), "YEARLY", "USD") \
+        == (None, None, False, "none")
+
+
+def test_ac_1_4_listed_implies_a_value():
+    """Invariant: salary_listed=True must never come with a null salary."""
+    cases = [(95000.0, float("nan"), float("nan"), "YEARLY", "USD"),
+             (95000.0, 90000.0, 100000.0, "YEARLY", "USD"),
+             (None, 40.0, 60.0, "HOURLY", "USD"),
+             (float("nan"), None, None, None, None)]
+    for c in cases:
+        lo, hi, listed, _ = normalize_salary(*c)
+        assert listed == (lo is not None and hi is not None)

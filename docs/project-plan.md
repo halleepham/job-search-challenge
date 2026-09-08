@@ -118,7 +118,7 @@ numbers and a grader must be able to read them without running the pipeline.
 
 ## REQ-1: Job data ingestion and corpus construction
 
-**Status:** FROZEN v1.3 (2026-09-08)
+**Status:** FROZEN v1.3 (2026-09-08) — **IMPLEMENTED**, all ACs pass (119 tests)
 **Traces to:** report §5 (Big Data Collection, Storage, and Processing), §1 (big data goal)
 **Tests:** `tests/test_req1_ingestion.py`
 

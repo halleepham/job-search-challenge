@@ -15,6 +15,7 @@ implementation of each rule.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,6 +150,15 @@ def is_tech_title(title_normalized: str | None) -> bool:
     return _TECH_TITLE_RE.search(title_normalized) is not None
 
 
+def _is_num(value) -> bool:
+    """
+    True only for a real number. Guards the NaN trap: pandas yields NaN rather
+    than None for a missing numeric cell, and ``NaN is not None`` is True, so a
+    plain None check silently admits NaN and propagates it through arithmetic.
+    """
+    return value is not None and isinstance(value, (int, float)) and value == value
+
+
 def normalize_salary(
     normalized_salary: float | None,
     salary_min: float | None,
@@ -174,12 +184,14 @@ def normalize_salary(
 
     mult = SALARY_MULTIPLIERS.get((pay_period or "").upper())
 
-    if normalized_salary is not None and normalized_salary == normalized_salary:
-        if mult and salary_min is not None and salary_max is not None:
+    has_range = mult and _is_num(salary_min) and _is_num(salary_max)
+
+    if _is_num(normalized_salary):
+        if has_range:
             return salary_min * mult, salary_max * mult, True, "normalized_salary"
         return normalized_salary, normalized_salary, True, "normalized_salary"
 
-    if mult and salary_min is not None and salary_max is not None:
+    if has_range:
         return salary_min * mult, salary_max * mult, True, "derived"
 
     return None, None, False, "none"
@@ -394,8 +406,95 @@ def normalize_fields(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     return out, stats
 
 
+#: REQ-1 normalized schema — the columns phase 1 owns. `required_skills` and
+#: `preferred_skills` are added by REQ-2; `location_city/state/lat/lon` by REQ-6's
+#: geocoding. They are absent here rather than written as empty placeholders.
+CORPUS_SCHEMA = [
+    "job_id", "title", "title_normalized", "company", "location_raw", "is_remote",
+    "work_setting", "work_setting_inferred", "employment_type", "min_years_exp",
+    "min_years_exp_source", "education_required", "salary_min", "salary_max",
+    "salary_listed", "salary_source", "description", "posted_date",
+]
+
+
+def build_corpus(
+    postings_path: Path | str,
+    job_skills_path: Path | str,
+    out_dir: Path | str = "data/processed",
+) -> tuple[pd.DataFrame, dict]:
+    """
+    AC-1.8 / AC-1.9: run REQ-1 end to end and persist the corpus and its stats.
+
+    Writes ``jobs_tech.parquet`` and ``coverage_stats.json`` under *out_dir*.
+    Deterministic: dedupe breaks ties on ``job_id`` and the frame is ordered by
+    ``job_id``, so repeated runs produce identical output (AC-1.9).
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    scoped = scope_and_dedupe(postings_path, job_skills_path)
+    raw = scoped.frame
+    skills_desc_pct = (
+        round(100 * raw["skills_desc"].notna().mean(), 1)
+        if "skills_desc" in raw.columns else 0.0
+    )
+
+    df, field_stats = normalize_fields(raw)
+
+    df = df.rename(columns={"company_name": "company", "location": "location_raw"})
+    df["is_remote"] = df["work_setting"].eq("Remote")
+    df["posted_date"] = pd.to_datetime(
+        df.get("listed_time"), unit="ms", errors="coerce"
+    ).dt.date
+    for col in CORPUS_SCHEMA:
+        if col not in df.columns:
+            df[col] = None
+    df = df[CORPUS_SCHEMA].sort_values("job_id").reset_index(drop=True)
+
+    n_final = len(df)
+    stats = {
+        "funnel": {
+            "raw_load": scoped.n_raw,
+            "after_tech_scoping": scoped.n_after_scoping,
+            "after_dedupe": scoped.n_after_dedupe,
+            "after_employment_filter": n_final,
+            # AC-2.6 owns this stage. Left null rather than faked so the gap is
+            # visible in the artifact the report cites.
+            "after_zero_skill_drop": None,
+        },
+        "dropped": {
+            "non_tech": scoped.n_dropped_non_tech,
+            "duplicates": scoped.n_dropped_duplicates,
+            "excluded_employment_type": field_stats["n_excluded_employment_type"],
+        },
+        "coverage_pct": {
+            "salary_min": round(100 * df["salary_min"].notna().mean(), 1),
+            "education_required": round(100 * df["education_required"].notna().mean(), 1),
+            "min_years_exp": round(100 * df["min_years_exp"].notna().mean(), 1),
+            # AC-1.5: Unknown is expected to be empty on the LinkedIn corpus.
+            "work_setting_known": round(100 * df["work_setting"].ne("Unknown").mean(), 1),
+            "skills_desc": skills_desc_pct,
+        },
+        "salary_source": field_stats["salary_source"],
+        "min_years_exp_source": field_stats["min_years_exp_source"],
+        "work_setting": field_stats["work_setting"],
+        "employment_type": field_stats["employment_type"],
+    }
+
+    df.to_parquet(out_dir / "jobs_tech.parquet", index=False)
+    (out_dir / "coverage_stats.json").write_text(json.dumps(stats, indent=2, default=str))
+    return df, stats
+
+
 def main() -> None:
-    result = scope_and_dedupe("data/raw/postings.csv", "data/raw/jobs/job_skills.csv")
+    df, stats = build_corpus("data/raw/postings.csv", "data/raw/jobs/job_skills.csv")
+    f, d = stats["funnel"], stats["dropped"]
+
+    class _R:
+        n_raw = f["raw_load"]; n_after_scoping = f["after_tech_scoping"]
+        n_after_dedupe = f["after_dedupe"]
+        n_dropped_non_tech = d["non_tech"]; n_dropped_duplicates = d["duplicates"]
+    result = _R()
     pct = 100 * result.n_after_dedupe / result.n_raw
     print("\nREQ-1 phase 1a funnel (AC-1.1, AC-1.2, AC-1.3)")
     print("-" * 52)
@@ -404,16 +503,15 @@ def main() -> None:
     print(f"  = after tech scoping      {result.n_after_scoping:>8,}")
     print(f"  - duplicates dropped      {result.n_dropped_duplicates:>8,}")
     print(f"  = corpus                  {result.n_after_dedupe:>8,}   ({pct:.1f}% of raw)")
-    df, stats = normalize_fields(result.frame)
-    print(f"  - non-job types dropped   {stats['n_excluded_employment_type']:>8,}   (AC-1.6a)")
+    print(f"  - non-job types dropped   {d['excluded_employment_type']:>8,}   (AC-1.6a)")
     print(f"  = corpus after 1b         {len(df):>8,}")
 
     print("\nREQ-1 phase 1b field coverage (AC-1.4 - AC-1.7)")
     print("-" * 52)
-    print(f"  salary listed             {stats['salary_listed_pct']:>7}%")
+    print(f"  salary listed             {stats['coverage_pct']['salary_min']:>7}%")
     for k, v in stats["salary_source"].items():
         print(f"      via {k:<20}{v:>8,}")
-    print(f"  education parsed          {stats['education_required_pct']:>7}%")
+    print(f"  education parsed          {stats['coverage_pct']['education_required']:>7}%")
     print("  experience source")
     for k, v in stats["min_years_exp_source"].items():
         print(f"      {k:<24}{v:>8,}")
@@ -423,6 +521,7 @@ def main() -> None:
     print("  employment type")
     for k, v in stats["employment_type"].items():
         print(f"      {k:<24}{v:>8,}")
+    print("\n  wrote data/processed/jobs_tech.parquet  and  coverage_stats.json")
     print("\nNote: final corpus size is set by AC-2.6 (gazetteer coverage), not by this stage.")
 
 
