@@ -50,7 +50,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 | D8 | **Semantic scores are calibrated against a fixed background distribution** | Pool-relative min-max makes every score depend on every other candidate, so adding one job reorders the top 5 and no acceptance criterion can assert a score value | Pool-relative min-max (draft §8.2); a fixed rescaling multiplier (Stage 2 AI code) |
 | D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
 | D10 | **The cross-encoder is a pruner, not a scored component** | A cross-encoder score is an undecomposable relevance number. Including it in the match score would import an unexplainable term into the one artifact that must be explainable | Cross-encoder as a weighted score component (draft §6.5 evaluates it this way) |
-| D11 | **Python computes the score; the LLM only explains it** | Deterministic, reproducible, unit-testable. LLM-computed scores drift between runs | LLM-computed scores (retained separately as the prompt-engineering exercise, REQ-10) |
+| D11 | **No LLM in the application. Evidence is retrieved, not generated** | Every number and every quote the user sees is produced by deterministic code: scores from REQ-9, supporting résumé text from REQ-4's semantic retrieval with verifiable character spans. The co-design prep's "Practice with Agentic AI" section was a prompt-engineering exercise — practice at directing an AI — not a component of the product, and building it in would have added an API key, a cost, and a reproducibility barrier (a grader cannot run it) for something the assignment never required. Report §6 asks about an LLM's role only *if* one is used | A hosted LLM explanation layer (removed, see REQ-10); LLM-computed scores (drift between runs, untestable) |
 | D12 | **Industry is dropped from the score** | Scope, not data quality. Stage 1 gave it only 0.10 of the manual score, and the deadline does not allow a component that small to earn its implementation and test cost. **Correction (2026-09-08):** this decision was originally justified as "industry labels are inconsistent across sources" — the schema audit refuted that. `job_industries.csv` is 0% null on both columns and `mappings/industries.csv` carries 422 clean industry names. The data is good; the reason for dropping it is priority. Recorded as an explicit rejection, not an omission, and a strong candidate for report §12 future work | Keeping the Stage 1 industry component |
 
 ### 0.4 Architecture
@@ -93,7 +93,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
   (4) SCORE          8-component weighted score, calibrated semantics  [D8]
          │
          ▼
-  (5) RANK → top 5 ─→ (6) EXPLAIN  LLM, grounded in retrieved résumé chunks  [D11]
+  (5) RANK → top 5 ─→ (6) EVIDENCE  retrieve supporting résumé chunks per job  [D11]
                               │
                               ▼
                      Results page (REQ-11) · Analytics page (REQ-12)
@@ -408,7 +408,8 @@ quoted. This is what lets explanations cite real sentences instead of templated 
   education, the skills block, each work-experience entry, each project, each credential block, and
   the career-goals statement. A typical résumé yields 6-12 chunks.
 - **AC-4.2** — Each chunk carries metadata `{section, source, char_span}`. `char_span` indexes back
-  into the original document so a quoted span can be verified as verbatim (AC-10.4).
+  into the original document so every displayed quote is provably verbatim source text (AC-11.5),
+  never paraphrase.
 - **AC-4.3** — The embedding model is `sentence-transformers/all-MiniLM-L6-v2`, pinned by exact name
   in one constants module and used for the personal KB, the job corpus, and the retrieval query.
   Mixing embedding spaces is a correctness error, not a tuning choice.
@@ -643,8 +644,8 @@ semantic split is carried over from the Stage 2 co-design prep unchanged, so the
 - **AC-9.9** — **Career goals ~ description** = calibrated cosine between the career-goals embedding
   and the job embedding.
 - **AC-9.10** — **Résumé evidence ~ description** = calibrated maximum cosine over the retrieved
-  personal chunks for that job. The chunks producing this score are the same ones handed to REQ-10
-  as evidence.
+  personal chunks for that job. The chunks producing this score are the same ones surfaced to the
+  user as evidence in AC-11.5, so the score and the justification shown to the user cannot disagree.
 - **AC-9.11** — Calibration (D8) maps raw cosine through
   `clip((raw - p5) / (p95 - p5), 0, 1)` using the persisted constants from AC-5.5. Scores do **not**
   depend on the composition of the candidate set: adding an unrelated job to the pool changes no other
@@ -663,45 +664,35 @@ spec-change protocol if the evidence says so — not silently in code.
 
 ---
 
-## REQ-10: Grounded explanation layer
+## REQ-10: ~~Grounded explanation layer~~ — **REMOVED**
 
-**Status:** DRAFT
-**Traces to:** report §6 (LLM role), §4 (co-design enhancement over templated summaries)
-**Tests:** `tests/test_req10_explanations.py`
+**Status:** REMOVED 2026-09-08 (never implemented; no code was written against it)
 
-**Description:**
-For each of the top 5 jobs, one LLM call produces an explanation grounded in verbatim résumé quotes.
-Python computes the score; the LLM narrates it (D11).
+This requirement specified a hosted-LLM explanation layer generating a narrative paragraph per
+ranked job. It is removed from scope. The number is retained rather than reused so that earlier
+commits, the changelog, and the report remain readable.
 
-**Acceptance Criteria:**
+**Why it was removed.** The co-design prep's section (6) — "Practice with Agentic AI", an initial
+prompt and a revised version with a fixed rubric — is an exercise in *directing* an AI, and belongs
+in the report as exactly that. It was never a product requirement. Building it in would have added
+an API key, a per-run cost, and a reproducibility barrier (AC-14.3: a grader must be able to run
+this repo) in exchange for prose. Report §6 asks an LLM's role to be explained only *if* an LLM is
+used.
 
-- **AC-10.1** — The call receives the job's fields, the retrieved personal chunks, the computed
-  component breakdown, and the titles and scores of the jobs immediately above and below in the ranking.
-- **AC-10.2** — The LLM does **not** compute or alter the match score. The score displayed always comes
-  from REQ-9. If the model returns a score, it is ignored.
-- **AC-10.3** — Output is a structured schema — `{evidence: [{job_requirement, resume_quote}], missing:
-  [{item, type}], ranking_explanation}` — enforced by the SDK's structured-output mechanism, not by
-  asking for JSON in prose.
-- **AC-10.4** — **Grounding is verified in code, not trusted.** Every `resume_quote` returned is checked
-  against the source documents by exact substring match. A quote that does not appear verbatim is
-  dropped and its claimed skill is moved to `missing`. Tested with a profile that plainly lacks a
-  required skill: the system must not credit it.
-- **AC-10.5** — The profile block is placed in the cached prefix and the volatile job content after it,
-  so the identical profile across five calls is cached. `cache_read_input_tokens` is asserted non-zero
-  on calls after the first.
-- **AC-10.6** — Errors are caught most-specific-first and degrade gracefully: on any API failure the
-  card renders with its full component breakdown and matched/missing skills, and a notice that the
-  narrative explanation is unavailable. **The application is fully usable with no API key.**
-- **AC-10.7** — Example generated explanations are committed under `data/processed/` so a grader can see
-  the output without credentials (supports report §11).
-- **AC-10.8** — The prompt-engineering exercise from the co-design prep — the LLM scoring the job from
-  the fixed rubric — is implemented as a **separate, clearly-labeled comparison path**, not as the
-  production scorer. Its divergence from the Python score is reported in REQ-13.
+**What is kept, and why nothing important is lost.** The evidence survives the removal — it was
+never the LLM that produced it. REQ-4's semantic retrieval already finds the résumé chunks that best
+support each job, and AC-4.2's character spans make every displayed quote provably verbatim. So the
+user still sees *"you match Airflow — here is the line from your résumé that shows it"*, and the
+system still improves markedly on the Stage 2 AI code, whose `match_summary` was string
+concatenation (`agent-exercise:src/matcher.py`) carrying no evidence at all. What is given up is a
+generated narrative paragraph, not the grounding. Display moves to **AC-11.5**.
 
-**Notes / Open Questions:**
-Exact SDK parameter names are pinned at implementation time against current documentation rather than
-frozen into this spec; the draft plan's example call used `cache_control` as a top-level parameter,
-which is not where it belongs.
+**Stretch, if time allows:** a local Hugging Face model (no API key, no cost, runs offline) could
+generate the narrative from the already-retrieved evidence. Listed under Non-Goals. Any such layer
+is display-only and may never alter a score — D11 holds regardless of where the text comes from.
+
+**The prompt-engineering exercise still appears in the report**, sourced from the co-design prep
+document, as Stage 2 practice rather than as shipped code.
 
 ---
 
@@ -726,7 +717,11 @@ A dedicated page rendering the ranked top 5 with full score transparency.
   shown as renormalized.
 - **AC-11.4** — Matched skills display with their supporting résumé quote; missing skills display
   separately.
-- **AC-11.5** — The LLM explanation renders in the expanded card, or the AC-10.6 fallback notice does.
+- **AC-11.5** — Each matched skill renders alongside the supporting résumé chunk retrieved for that
+  job (REQ-4), with the matched span highlighted. Quotes are sliced from the source document by the
+  character spans of AC-4.2 and are verbatim by construction — the UI never paraphrases, summarizes,
+  or generates résumé text. A skill with no retrieved chunk above the similarity floor is shown as
+  matched-without-evidence rather than given an invented justification.
 - **AC-11.6** — A score-distribution chart across the returned results is shown.
 - **AC-11.7** — Every field collected on the profile page is either used by a filter or a score
   component, or is not collected. No field is stored and then ignored — the exact defect in the Stage 2
@@ -778,7 +773,7 @@ compliance*.
   methods.
 - **AC-13.2** — **End-to-end evaluation** with filters enabled, reporting the top 5 for each of the
   three preset profiles from AC-3.7.
-- **AC-13.3** — **Latency**, measured per stage (filter, retrieve, prune, score, explain) as median and
+- **AC-13.3** — **Latency**, measured per stage (filter, retrieve, prune, score, evidence) as median and
   p95 over ≥20 runs.
 - **AC-13.4** — **Scalability**: the ingestion job is timed over increasing corpus sizes — the ~30k
   tech subset, the full ~124k LinkedIn corpus, and the ~786k-row `data_jobs` corpus — and plotted,
@@ -793,8 +788,6 @@ compliance*.
   top 5 is reported, identifying components that cannot discriminate. Includes the correlation between
   the two semantic components; if r > 0.8 they are double-counting one signal and REQ-9 is revised
   through the spec-change protocol.
-- **AC-13.7** — **LLM vs. Python scoring** divergence from AC-10.8, with the largest disagreements
-  inspected — a sharp divergence usually indicates a real weakness in a sub-score formula.
 - **AC-13.8** — Every table and figure the report cites from this notebook is exported to
   `notebooks/figures/`.
 
@@ -831,6 +824,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
   deliberately dropped — it is ungraded, and a handful of thumbs cannot support weight learning.
 - GitHub repository ingestion into the knowledge base.
 - Three-way side-by-side job comparison and radar charts.
+- Any hosted-LLM dependency, and any API key requirement at runtime (REQ-10, removed).
 - Company industry, posting recency, applicant count, equity/bonus, visa sponsorship, security
   clearance as score components (D12).
 - Non-tech job domains (D3).
@@ -838,11 +832,12 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 **Stretch — build only if the must-ship list is complete:**
 - REQ-8 cross-encoder pruning.
+- Local Hugging Face narrative generation over the already-retrieved evidence (REQ-10 stretch note).
 - LLM-based résumé field extraction (manual entry is the guaranteed path).
 - A PySpark implementation of the ingestion job, for the engine-comparison timing in AC-13.4.
 - Lazy explanation generation below the top 5.
 
-**Must ship:** REQ-1 through REQ-7 and REQ-9 through REQ-14.
+**Must ship:** REQ-1 through REQ-7, REQ-9, and REQ-11 through REQ-14. (REQ-8 is stretch; REQ-10 is removed.)
 
 ---
 
@@ -861,6 +856,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | REQ-10 (removed), D11, AC-4.2, AC-9.10, AC-11.5, AC-13.3, AC-13.7 (removed), Non-Goals | Removed the hosted-LLM explanation layer entirely. D11 restated as "no LLM in the application; evidence is retrieved, not generated". Evidence display moved to AC-11.5, backed by REQ-4 retrieval and AC-4.2 character spans. Local HF generation noted as stretch | The co-design prep's "Practice with Agentic AI" was a prompt-engineering exercise, not a product requirement — the assignment asks an LLM's role to be explained only *if* one is used. Shipping it would have added an API key, a per-run cost, and a reproducibility barrier for prose, while the grounding it was supposed to provide already comes from semantic retrieval. No code had been written against REQ-10 |
 | 2026-09-08 | AC-1.1, AC-1.2 | Pinned `TECH_CODES = {IT, ENG, ANLS, QA, SCI}` (33,502 postings, 27%); required the join to semi-join/dedupe; recorded that the gazetteer, not `TECH_CODES`, sets final corpus size | Schema audit measured the code distribution and found `job_skills.csv` fans out at 1.69 rows/job. Only ~55% of the code set has a software/data title, but AC-2.6 drops the rest for having no gazetteer skills |
 | 2026-09-08 | AC-1.5 | `remote_allowed` null now means "not remote" rather than "unknown"; `Unknown` asserted empty for the LinkedIn corpus | Audit found the column is a sparse flag with exactly two values (1.0 / null), not a nullable boolean. Routing null to `Unknown` would put 87.7% of the corpus there and, under AC-6.6's pass-and-tag policy, turn the work-setting filter into a no-op |
 | 2026-09-08 | AC-1.6a (new), AC-3.3 | `formatted_work_type` has 7 values, not 4. Retained Full-time/Contract/Part-time/Temporary/Internship; excluded Volunteer and Other from the corpus; profile page gains a fifth checkbox | The enum was written from assumption. Volunteer and Other are not roles this system's users search for |

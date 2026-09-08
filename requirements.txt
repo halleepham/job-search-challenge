@@ -26,10 +26,6 @@ pypdf==5.0.1
 streamlit==1.39.0
 plotly==5.24.1
 
-# --- Explanation layer (REQ-10) — optional at runtime, see AC-10.6 ---
-anthropic>=0.40.0
-python-dotenv==1.0.1
-
 # --- Testing & notebooks (REQ-13) ---
 pytest==8.3.3
 jupyter==1.1.1
