@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** DRAFT — no section frozen yet.
+**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.1, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -121,7 +121,7 @@ numbers and a grader must be able to read them without running the pipeline.
 
 ## REQ-1: Job data ingestion and corpus construction
 
-**Status:** DRAFT
+**Status:** FROZEN v1.1 (2026-09-08)
 **Traces to:** report §5 (Big Data Collection, Storage, and Processing), §1 (big data goal)
 **Tests:** `tests/test_req1_ingestion.py`
 
@@ -188,9 +188,14 @@ Normalized job schema:
   those postings match no gazetteer skill, extract zero skills, and are dropped. A consequence
   worth stating plainly — the final corpus size is determined by gazetteer coverage, not by
   `TECH_CODES`, and is not knowable until REQ-2 runs. Current estimate 18-25k.
-- **AC-1.3** — Deduplication is applied on `(title_normalized, company_normalized, location_normalized)`
-  where all three are lowercased and whitespace-collapsed **before** comparison. The dropped row
-  count is recorded in `coverage_stats.json`.
+- **AC-1.3** — Deduplication is applied on `(title_key, company_key, location_key)`, where each key
+  is the raw field lowercased, punctuation-stripped, and whitespace-collapsed **before** comparison.
+  The dropped row count is recorded in `coverage_stats.json`.
+  **`title_key` deliberately preserves seniority modifiers**, unlike `title_normalized`, which strips
+  them for AC-1.1's whitelist and AC-9.7's role matching. Amended v1.1 (2026-09-08): the original
+  wording keyed dedupe on `title_normalized`, which merged "Senior Data Engineer" and "Data Engineer"
+  at the same company and location into one row. Those are two distinct openings, and a user
+  filtering by experience would silently lose one of them.
 - **AC-1.4** — Salary uses the dataset's existing `normalized_salary` column as the authoritative
   annual-USD value when it is non-null. When it is null, fall back to deriving from
   `min_salary`/`max_salary` + `pay_period`: `HOURLY` x 2080, `MONTHLY` x 12, `YEARLY` passes through.
@@ -244,7 +249,7 @@ which is what makes the optional engine comparison in AC-13.4 cheap.
 
 ## REQ-2: Skill vocabulary and extraction
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-08)
 **Traces to:** report §5 (skill extraction, feature construction), §6 (skill similarity)
 **Tests:** `tests/test_req2_skills.py`
 
@@ -869,6 +874,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | AC-1.3 (REQ-1 → FROZEN v1.1) | Dedupe key changed from `title_normalized` (seniority-stripped) to `title_key` (seniority preserved) | Found while implementing phase 1a: the frozen wording merged "Senior Data Engineer" and "Data Engineer" at the same company and location into a single row. Those are distinct openings, and the loss would have been silent — the dedupe drop count would simply have been higher, with nothing to indicate real postings had been destroyed. `title_normalized` still strips seniority for AC-1.1 and AC-9.7 |
 | 2026-09-08 | AC-5.1, AC-5.2 | Dense vector now embeds `title + description` (skills excluded); BM25 indexes `title + skills + description` untruncated. Token limit corrected 512 → 256 | Two problems found when caching the model: the stated 512-token maximum was wrong (`all-MiniLM-L6-v2` is 256), and AC-5.1 contradicted AC-9.12 by embedding skills that already have their own score components. Splitting the two indexes resolves both at no cost and gives a better division of labor — the dense vector stops duplicating what BM25 does well |
 | 2026-09-08 | AC-4.1 | Résumé chunking simplified from heading-driven semantic sections to paragraph blocks | Scope trim against a 3-day deadline. Résumés are already visually blocked, so paragraph splits land on nearly the same boundaries; heading detection across arbitrary résumé formats is brittle and would have been REQ-4's largest source of edge cases for no measurable retrieval gain. Capability unchanged |
 | 2026-09-08 | AC-13.1 | Retrieval evaluation switched from ~30 pre-labeled pairs to pooled judgment over the union of configurations' top-10s | Less manual labeling *and* a sounder method — pooling cannot under-credit a configuration for surfacing a relevant job that was never in a pre-chosen label set |

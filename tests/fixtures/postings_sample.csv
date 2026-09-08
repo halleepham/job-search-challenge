@@ -1,0 +1,21 @@
+job_id,title,company_name,location,description
+1,Senior Data Engineer,Acme Corp,"Kansas City, MO",Build ETL pipelines in Airflow
+2,Software Engineer II,Acme Corp,"Austin, TX",Backend services in Go
+3,Data Analyst,Beta LLC,"Remote",SQL and Tableau reporting
+4,Registered Nurse,Mercy Health,"Kansas City, MO",Provide patient care
+5,Warehouse Associate,ShipCo,"Dallas, TX",Pick and pack orders
+6,Sales Engineer,TechSales Inc,"Chicago, IL",Technical pre-sales support
+7,Mechanical Engineer,BuildCo,"Detroit, MI",Design HVAC systems
+8,QA Automation Engineer,Beta LLC,"Remote",Selenium test suites
+9,Worship Leader,Grace Church,"Tulsa, OK",Lead Sunday services
+10,Machine Learning Scientist,DeepAI,"Seattle, WA",Train ranking models
+11,senior data engineer,ACME CORP,"kansas city, mo",Duplicate of job 1 with different casing
+12,Data Engineer,Acme Corp,"Kansas City,  MO",Whitespace variant company
+13,Account Executive,SalesForce Co,"Boston, MA",Close enterprise deals
+14,Cloud Infrastructure Architect,Nimbus,"Denver, CO",Terraform and Kubernetes
+15,Construction Project Manager,BuildCo,"Detroit, MI",Manage site schedules
+16,Full Stack Developer,Startly,"Remote",React and Node
+17,Physical Therapist,Mercy Health,"Springfield, MO",Rehabilitation therapy
+18,Security Analyst,SecureNet,"Washington, DC",SOC monitoring
+19,Barista,CoffeeCo,"Portland, OR",Prepare beverages
+20,Database Administrator,DataHouse,"Phoenix, AZ",Postgres administration
