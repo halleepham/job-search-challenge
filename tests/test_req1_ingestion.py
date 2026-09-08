@@ -180,3 +180,200 @@ def test_is_tech_title_accepts(title):
 ])
 def test_is_tech_title_rejects(title):
     assert not is_tech_title(title)
+
+
+# ============================================================ PHASE 1b
+# AC-1.4 salary · AC-1.5 work setting · AC-1.6/1.6a experience + employment type
+# · AC-1.7 education. All pure functions — no database connection (AC-1.10).
+
+from src.ingest import (  # noqa: E402
+    EDUCATION_LEVELS,
+    SENIORITY_YEARS,
+    normalize_employment_type,
+    normalize_salary,
+    parse_education,
+    parse_min_years,
+    derive_work_setting,
+)
+
+
+# ---------------------------------------------------------------- AC-1.4
+
+def test_ac_1_4_prefers_normalized_salary():
+    """AC-1.4: normalized_salary is authoritative when non-null."""
+    lo, hi, listed, src = normalize_salary(38480.0, 17.0, 20.0, "HOURLY", "USD")
+    assert listed and src == "normalized_salary"
+    assert (lo, hi) == (17.0 * 2080, 20.0 * 2080), "range annualized from min/max"
+
+
+def test_ac_1_4_normalized_without_range():
+    """AC-1.4: 6,280 real rows carry normalized_salary but no min/max."""
+    lo, hi, listed, src = normalize_salary(90000.0, None, None, "YEARLY", "USD")
+    assert (lo, hi, listed, src) == (90000.0, 90000.0, True, "normalized_salary")
+
+
+@pytest.mark.parametrize("period,mult", [("HOURLY", 2080), ("MONTHLY", 12), ("YEARLY", 1)])
+def test_ac_1_4_derivation_fallback(period, mult):
+    """AC-1.4: with normalized_salary null, derive from min/max x pay_period."""
+    lo, hi, listed, src = normalize_salary(None, 10.0, 20.0, period, "USD")
+    assert (lo, hi) == (10.0 * mult, 20.0 * mult)
+    assert listed and src == "derived"
+
+
+@pytest.mark.parametrize("period", [None, "WEEKLY", "BIWEEKLY", "PER_PROJECT"])
+def test_ac_1_4_unhandled_period_yields_none(period):
+    """AC-1.4: any other or missing pay_period yields None / salary_listed False."""
+    assert normalize_salary(None, 10.0, 20.0, period, "USD") == (None, None, False, "none")
+
+
+def test_ac_1_4_no_salary_at_all():
+    assert normalize_salary(None, None, None, None, None) == (None, None, False, "none")
+
+
+def test_ac_1_4_non_usd_rejected():
+    """AC-1.4 says annual USD. 11 real rows are EUR/CAD/BBD and cannot be converted."""
+    assert normalize_salary(90000.0, None, None, "YEARLY", "EUR") == (None, None, False, "non_usd")
+
+
+def test_ac_1_4_every_case_has_a_rule():
+    """AC-1.4: exactly one rule per input case, nothing falls through."""
+    cases = [(38480.0, 17.0, 20.0, "HOURLY", "USD"), (90000.0, None, None, "YEARLY", "USD"),
+             (None, 10.0, 20.0, "YEARLY", "USD"), (None, 10.0, 20.0, "WEEKLY", "USD"),
+             (None, None, None, None, None), (90000.0, None, None, "YEARLY", "EUR")]
+    sources = {normalize_salary(*c)[3] for c in cases}
+    assert sources == {"normalized_salary", "derived", "none", "non_usd"}
+
+
+# ---------------------------------------------------------------- AC-1.5
+
+def test_ac_1_5_remote_flag_wins():
+    assert derive_work_setting(1.0, "Data Engineer", "Work from anywhere") == ("Remote", False)
+
+
+def test_ac_1_5_null_flag_means_not_remote():
+    """
+    AC-1.5: remote_allowed is a sparse flag (1.0 / null), not a nullable boolean.
+    Null must NOT route to Unknown — 87.7% of the corpus is null, and under
+    AC-6.6's pass-and-tag policy that would make the work-setting filter a no-op.
+    """
+    setting, inferred = derive_work_setting(None, "Data Engineer", "Onsite in our KC office")
+    assert setting == "On-site" and inferred is True
+
+
+@pytest.mark.parametrize("text", ["This is a hybrid role", "Hybrid schedule, 3 days onsite"])
+def test_ac_1_5_hybrid_detected(text):
+    assert derive_work_setting(None, "Data Engineer", text)[0] == "Hybrid"
+
+
+def test_ac_1_5_hybrid_needs_word_boundary():
+    """'hybridization' must not make a job Hybrid."""
+    assert derive_work_setting(None, "Research Scientist",
+                               "Experience with hybridization assays")[0] == "On-site"
+
+
+def test_ac_1_5_inferred_flag_set_only_when_derived():
+    assert derive_work_setting(1.0, "X", "y")[1] is False       # read from the flag
+    assert derive_work_setting(None, "X", "hybrid role")[1] is True   # inferred
+    assert derive_work_setting(None, "X", "y")[1] is True             # inferred
+
+
+# ---------------------------------------------------------------- AC-1.6a
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Full-time", "Full-time"), ("Contract", "Contract"), ("Part-time", "Part-time"),
+    ("Temporary", "Temporary"), ("Internship", "Internship"),
+])
+def test_ac_1_6a_retained_types(raw, expected):
+    assert normalize_employment_type(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["Volunteer", "Other", None, ""])
+def test_ac_1_6a_excluded_types(raw):
+    """AC-1.6a: Volunteer and Other are excluded from the corpus entirely."""
+    assert normalize_employment_type(raw) is None
+
+
+# ---------------------------------------------------------------- AC-1.6
+
+def test_ac_1_6_regex_takes_precedence_over_label():
+    years, src = parse_min_years("Requires 5+ years of experience", "Entry level")
+    assert (years, src) == (5.0, "description_regex")
+
+
+@pytest.mark.parametrize("label,years", list(SENIORITY_YEARS.items()))
+def test_ac_1_6_seniority_fallback(label, years):
+    assert parse_min_years("No numeric requirement stated here", label) == (years, "seniority_label")
+
+
+def test_ac_1_6_no_signal_is_none():
+    assert parse_min_years("No requirement stated", None) == (None, "none")
+
+
+def test_ac_1_6_implausible_values_ignored():
+    """'100 years of combined leadership' is not an experience requirement."""
+    assert parse_min_years("100 years of combined experience", None) == (None, "none")
+
+
+def test_ac_1_6_first_match_wins():
+    """Deterministic rule: the first stated figure, which is the requirement line."""
+    assert parse_min_years("3 years required; 10 years preferred", None)[0] == 3.0
+
+
+# ---------------------------------------------------------------- AC-1.7
+
+@pytest.mark.parametrize("text,level", [
+    ("High school diploma required", 1), ("GED or equivalent", 1),
+    ("Associate degree in IT", 2), ("Bachelor's degree in CS", 3),
+    ("BS/BA in a technical field", 3), ("Master's degree preferred", 4),
+    ("MBA required", 4), ("PhD in Statistics", 5), ("Doctorate required", 5),
+])
+def test_ac_1_7_degree_keywords(text, level):
+    assert parse_education(text) == level
+
+
+def test_ac_1_7_lowest_wins():
+    """
+    AC-1.7: when several degrees appear, take the LOWEST — "Bachelor's required,
+    Master's preferred" requires a bachelor's.
+    """
+    assert parse_education("Bachelor's degree required, Master's preferred") == 3
+    assert parse_education("PhD or Master's or Bachelor's") == 3
+
+
+def test_ac_1_7_no_match_is_none():
+    assert parse_education("Five years of pipeline experience") is None
+
+
+@pytest.mark.parametrize("text", [
+    "Proficiency with MS Office and Excel",
+    "Experience with MS Word",
+    "Familiarity with BS 7799 security standards",
+])
+def test_ac_1_7_abbreviation_false_positives(text):
+    """
+    'MS Office' must not read as a Master's degree. Bare BS/MS/BA/MA are never
+    matched — only explicit degree phrasings.
+    """
+    assert parse_education(text) is None
+
+
+def test_ac_1_7_ladder_is_ordinal():
+    assert EDUCATION_LEVELS["high school"] < EDUCATION_LEVELS["bachelor"] < EDUCATION_LEVELS["phd"]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("4-7 years related business experience", 4.0),
+    ("3-5+ years of experience", 3.0),
+    ("2 - 4 years in a similar role", 2.0),
+    ("5–7 years experience", 5.0),          # en dash
+    ("7+ years of experience", 7.0),
+    ("10 years of increasingly responsible experience", 10.0),
+    ("1+ years' experience in one or more", 1.0),
+])
+def test_ac_1_6_v1_3_range_takes_lower_bound(text, expected):
+    """
+    AC-1.6 v1.3: min_years_exp is a MINIMUM, so a range yields its lower bound.
+    The original regex matched the upper bound because "4-" is not followed by
+    "years", overstating every ranged requirement.
+    """
+    assert parse_min_years(text, None)[0] == expected

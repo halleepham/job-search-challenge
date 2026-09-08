@@ -63,6 +63,53 @@ _PUNCT_RE = re.compile(r"[^\w\s]")
 _WS_RE = re.compile(r"\s+")
 
 
+# --- AC-1.4 / AC-1.5 / AC-1.6 / AC-1.6a / AC-1.7 constants ------------------
+
+#: Annualization multipliers. AC-1.4 defines rules for these three only; every
+#: other or missing pay_period yields no salary. Measured 2026-09-08: WEEKLY (177)
+#: and BIWEEKLY (9) exist in the data but every one of those rows also carries
+#: `normalized_salary`, so the primary path covers them and the derivation
+#: fallback never needs them.
+SALARY_MULTIPLIERS = {"HOURLY": 2080, "MONTHLY": 12, "YEARLY": 1}
+
+#: AC-1.6a: retained employment types. `Volunteer` (562) and `Other` (487) are
+#: excluded from the corpus - neither is a role a user of this system searches for.
+EMPLOYMENT_TYPES = frozenset(
+    {"Full-time", "Contract", "Part-time", "Temporary", "Internship"}
+)
+
+#: AC-1.6: fallback mapping when the description states no numeric requirement.
+SENIORITY_YEARS = {
+    "Internship": 0.0, "Entry level": 0.0, "Associate": 2.0,
+    "Mid-Senior level": 5.0, "Director": 8.0, "Executive": 10.0,
+}
+
+#: AC-1.7 / AC-9.6: ordinal education ladder.
+EDUCATION_LEVELS = {
+    "high school": 1, "associate": 2, "bachelor": 3, "master": 4, "phd": 5,
+}
+
+#: AC-1.7: explicit degree phrasings only. Bare `bs`/`ms`/`ba`/`ma` are never
+#: matched - "MS Office" and "MS Word" would otherwise read as a Master's degree.
+_EDUCATION_PATTERNS = [
+    (1, r"high[- ]school|\bged\b|h\.s\.\s+diploma"),
+    (2, r"associate(?:'s|s)?\s+(?:degree|of)|\ba\.?a\.?s?\.?\s+degree"),
+    (3, r"bachelor|undergraduate\s+degree|\bb\.?s\.?\s*/\s*b\.?a\.?|"
+        r"\b(?:bs|ba)\s+degree|\bb\.s\.|\bb\.a\."),
+    (4, r"master(?:'s|s)?\s+(?:degree|of|in)|\bmba\b|\bm\.s\.|\bm\.a\.|"
+        r"graduate\s+degree"),
+    (5, r"\bph\.?\s?d\.?\b|doctorate|doctoral"),
+]
+_EDUCATION_RES = [(lvl, re.compile(pat, re.I)) for lvl, pat in _EDUCATION_PATTERNS]
+
+_YEARS_RE = re.compile(r"(\d+)\s*(?:[-–—]\s*\d+)?\s*\+?\s*years?", re.I)
+_HYBRID_RE = re.compile(r"\bhybrid\b", re.I)
+
+#: AC-1.6: an experience requirement above this is implausible and is treated as
+#: no match ("100 years of combined experience" is a company boast, not a rule).
+MAX_PLAUSIBLE_YEARS = 30
+
+
 # --- pure per-row functions (AC-1.10) ---------------------------------------
 
 def normalize_key(value: str | None) -> str:
@@ -100,6 +147,107 @@ def is_tech_title(title_normalized: str | None) -> bool:
     if not title_normalized:
         return False
     return _TECH_TITLE_RE.search(title_normalized) is not None
+
+
+def normalize_salary(
+    normalized_salary: float | None,
+    salary_min: float | None,
+    salary_max: float | None,
+    pay_period: str | None,
+    currency: str | None,
+) -> tuple[float | None, float | None, bool, str]:
+    """
+    AC-1.4: resolve salary to an annual USD range.
+
+    Returns ``(salary_min, salary_max, salary_listed, source)`` where source is
+    one of ``normalized_salary`` | ``derived`` | ``non_usd`` | ``none``, so
+    coverage stats can report how many rows took each path.
+
+    Precedence: the dataset's own `normalized_salary` (an annualized midpoint -
+    verified: (17+20)/2 x 2080 = 38,480) is authoritative. Deriving from
+    min/max x pay_period is the fallback. Measured 2026-09-08: every row with
+    min/max also has normalized_salary, so on this corpus the fallback never
+    fires - it is retained for correctness on other sources.
+    """
+    if currency is not None and str(currency).upper() not in ("USD", "NAN"):
+        return None, None, False, "non_usd"
+
+    mult = SALARY_MULTIPLIERS.get((pay_period or "").upper())
+
+    if normalized_salary is not None and normalized_salary == normalized_salary:
+        if mult and salary_min is not None and salary_max is not None:
+            return salary_min * mult, salary_max * mult, True, "normalized_salary"
+        return normalized_salary, normalized_salary, True, "normalized_salary"
+
+    if mult and salary_min is not None and salary_max is not None:
+        return salary_min * mult, salary_max * mult, True, "derived"
+
+    return None, None, False, "none"
+
+
+def derive_work_setting(
+    remote_allowed: float | None, title: str | None, description: str | None
+) -> tuple[str, bool]:
+    """
+    AC-1.5: ``(work_setting, work_setting_inferred)``.
+
+    `remote_allowed` is a **sparse flag**, not a nullable boolean - measured
+    2026-09-08 it takes exactly two values, 1.0 (15,246 rows) and null (108,603).
+    Null therefore means "not flagged remote", never "unknown": routing it to
+    Unknown would place 87.7% of the corpus there and, under AC-6.6's
+    pass-and-tag policy, silently turn the work-setting filter into a no-op.
+    """
+    if remote_allowed == 1:
+        return "Remote", False
+    haystack = f"{title or ''} {description or ''}"
+    if _HYBRID_RE.search(haystack):
+        return "Hybrid", True
+    return "On-site", True
+
+
+def normalize_employment_type(formatted_work_type: str | None) -> str | None:
+    """AC-1.6a: retained type, or None for rows excluded from the corpus."""
+    if not formatted_work_type:
+        return None
+    value = str(formatted_work_type).strip()
+    return value if value in EMPLOYMENT_TYPES else None
+
+
+def parse_min_years(
+    description: str | None, experience_level: str | None
+) -> tuple[float | None, str]:
+    """
+    AC-1.6: ``(min_years_exp, min_years_exp_source)``.
+
+    A numeric requirement in the description wins over the seniority label. The
+    first stated figure is taken - it is the requirement line, whereas later
+    figures are usually "X years preferred". For a range, the **lower** bound is
+    taken (AC-1.6 v1.3): the field is a minimum, so "4-7 years" means 4. Values
+    above ``MAX_PLAUSIBLE_YEARS`` are treated as no match.
+    """
+    for raw in _YEARS_RE.findall(description or ""):
+        years = float(raw)
+        if 0 < years <= MAX_PLAUSIBLE_YEARS:
+            return years, "description_regex"
+
+    if experience_level in SENIORITY_YEARS:
+        return SENIORITY_YEARS[experience_level], "seniority_label"
+
+    return None, "none"
+
+
+def parse_education(description: str | None) -> int | None:
+    """
+    AC-1.7: lowest degree ordinal stated in the description, or None.
+
+    Lowest wins because "Bachelor's required, Master's preferred" requires a
+    bachelor's. Only explicit degree phrasings match - bare `bs`/`ms`/`ba`/`ma`
+    are excluded so that "MS Office" does not read as a Master's degree.
+    """
+    if not description:
+        return None
+    found = [lvl for lvl, rx in _EDUCATION_RES if rx.search(description)]
+    return min(found) if found else None
 
 
 # --- set-oriented work (SQL) ------------------------------------------------
@@ -195,6 +343,57 @@ def scope_and_dedupe(postings_path: Path | str, job_skills_path: Path | str) -> 
     )
 
 
+def normalize_fields(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+    """
+    AC-1.4 through AC-1.7: apply the per-row rules over the scoped corpus.
+
+    Rows whose employment type is excluded by AC-1.6a (Volunteer, Other) are
+    dropped here and counted. Returns the normalized frame plus the per-path
+    counts AC-1.8 will persist to coverage_stats.json.
+    """
+    out = df.copy()
+
+    out["employment_type"] = out["formatted_work_type"].map(normalize_employment_type)
+    n_before = len(out)
+    out = out[out["employment_type"].notna()].copy()
+    n_excluded_employment = n_before - len(out)
+
+    salary = out.apply(
+        lambda r: normalize_salary(
+            r.get("normalized_salary"), r.get("min_salary"), r.get("max_salary"),
+            r.get("pay_period"), r.get("currency"),
+        ),
+        axis=1, result_type="expand",
+    )
+    out[["salary_min", "salary_max", "salary_listed", "salary_source"]] = salary
+
+    setting = out.apply(
+        lambda r: derive_work_setting(r.get("remote_allowed"), r.get("title"),
+                                      r.get("description")),
+        axis=1, result_type="expand",
+    )
+    out[["work_setting", "work_setting_inferred"]] = setting
+
+    years = out.apply(
+        lambda r: parse_min_years(r.get("description"), r.get("formatted_experience_level")),
+        axis=1, result_type="expand",
+    )
+    out[["min_years_exp", "min_years_exp_source"]] = years
+
+    out["education_required"] = out["description"].map(parse_education)
+
+    stats = {
+        "n_excluded_employment_type": n_excluded_employment,
+        "salary_source": out["salary_source"].value_counts().to_dict(),
+        "min_years_exp_source": out["min_years_exp_source"].value_counts().to_dict(),
+        "work_setting": out["work_setting"].value_counts().to_dict(),
+        "employment_type": out["employment_type"].value_counts().to_dict(),
+        "education_required_pct": round(100 * out["education_required"].notna().mean(), 1),
+        "salary_listed_pct": round(100 * out["salary_listed"].mean(), 1),
+    }
+    return out, stats
+
+
 def main() -> None:
     result = scope_and_dedupe("data/raw/postings.csv", "data/raw/jobs/job_skills.csv")
     pct = 100 * result.n_after_dedupe / result.n_raw
@@ -205,6 +404,25 @@ def main() -> None:
     print(f"  = after tech scoping      {result.n_after_scoping:>8,}")
     print(f"  - duplicates dropped      {result.n_dropped_duplicates:>8,}")
     print(f"  = corpus                  {result.n_after_dedupe:>8,}   ({pct:.1f}% of raw)")
+    df, stats = normalize_fields(result.frame)
+    print(f"  - non-job types dropped   {stats['n_excluded_employment_type']:>8,}   (AC-1.6a)")
+    print(f"  = corpus after 1b         {len(df):>8,}")
+
+    print("\nREQ-1 phase 1b field coverage (AC-1.4 - AC-1.7)")
+    print("-" * 52)
+    print(f"  salary listed             {stats['salary_listed_pct']:>7}%")
+    for k, v in stats["salary_source"].items():
+        print(f"      via {k:<20}{v:>8,}")
+    print(f"  education parsed          {stats['education_required_pct']:>7}%")
+    print("  experience source")
+    for k, v in stats["min_years_exp_source"].items():
+        print(f"      {k:<24}{v:>8,}")
+    print("  work setting")
+    for k, v in stats["work_setting"].items():
+        print(f"      {k:<24}{v:>8,}")
+    print("  employment type")
+    for k, v in stats["employment_type"].items():
+        print(f"      {k:<24}{v:>8,}")
     print("\nNote: final corpus size is set by AC-2.6 (gazetteer coverage), not by this stage.")
 
 

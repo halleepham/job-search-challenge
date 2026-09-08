@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.2, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
+**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.3, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -121,7 +121,7 @@ numbers and a grader must be able to read them without running the pipeline.
 
 ## REQ-1: Job data ingestion and corpus construction
 
-**Status:** FROZEN v1.2 (2026-09-08)
+**Status:** FROZEN v1.3 (2026-09-08)
 **Traces to:** report §5 (Big Data Collection, Storage, and Processing), §1 (big data goal)
 **Tests:** `tests/test_req1_ingestion.py`
 
@@ -231,11 +231,17 @@ Normalized job schema:
   Part-time 9,696 · Temporary 1,190 · Internship 983 · Volunteer 562 · Other 487. The first five
   are retained as the enum; `Volunteer` and `Other` are **excluded from the corpus** at ingestion
   and their dropped count recorded, since neither is a job a user of this system is searching for.
-- **AC-1.6** — `min_years_exp` is set from a `(\d+)\+?\s*years?` regex over the description when
-  one matches (`min_years_exp_source = "description_regex"`); otherwise from
+- **AC-1.6** — `min_years_exp` is set from a `(\d+)\s*(?:[-–—]\s*\d+)?\s*\+?\s*years?` regex over
+  the description when one matches, taking **the lower bound of any range**
+  (`min_years_exp_source = "description_regex"`); otherwise from
   `formatted_experience_level` via the map {Internship: 0, Entry level: 0, Associate: 2,
   Mid-Senior level: 5, Director: 8, Executive: 10} (`source = "seniority_label"`); otherwise
   `None` (`source = "none"`). Regex takes precedence over the label when both are available.
+  Amended v1.3 (2026-09-08): the original regex `(\d+)\+?\s*years?` took the **upper** bound of a
+  range — "4-7 years related business experience" parsed as 7, because "4-" is not followed by
+  "years". Since the field is a *minimum*, that overstated every ranged requirement, and under
+  AC-9.5 an inflated `job_min_years` widens `gap` and pushes down candidates who in fact qualify.
+  Found by sampling parsed output against source text, not by a failing test.
 - **AC-1.7** — `education_required` is parsed from the description to an ordinal 1-5 by degree
   keyword ("high school", "associate", "bachelor|BS|BA", "master|MS|MA|MBA", "PhD|doctorate").
   When several appear, the **lowest** is taken, since a posting saying "Bachelor's required,
@@ -882,6 +888,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 | Q2 | Are the two semantic components measuring one signal? | Final weights | AC-13.6 correlation check |
 | Q3 | Where is the single-machine/distributed crossover for this workload? | Nothing — reporting only | AC-13.4's optional PySpark comparison, if time allows; otherwise stated as a documented limitation |
 | Q4 | Is the ~30k tech corpus large enough for the retrieval comparison to differentiate methods? | AC-13.1 interpretation | Comparison runs unfiltered; if differences are marginal, that is itself a reportable finding |
+| Q5 | Does `matched/total_required` over-reward thin postings? A posting from which only one skill was extracted scores 1.0 on the heaviest component (30%) for matching that one skill, while a 7-skill posting matched in full scores the same | Whether AC-2.6 or AC-9.3 needs revising | AC-2.7's median-required-skills measurement decides it, inside REQ-2. If thin postings are rare, leave it. If common, either raise AC-2.6's floor from ≥1 to ≥3 skills, or damp the component by `× min(1, total_required/3)` so a 1-skill posting caps at 0.33. Note this is independent of D3's corpus decision — it applies equally in a pure software corpus |
 
 ---
 
@@ -889,6 +896,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | AC-1.6 (REQ-1 → FROZEN v1.3) | Experience regex now captures ranges and takes the lower bound | The frozen regex took the upper bound: "4-7 years related business experience" parsed as 7. The field is a *minimum*, so every ranged requirement was overstated, and AC-9.5 turns an inflated `job_min_years` into a wider `gap` — penalising candidates who actually qualify. Caught by sampling parsed output against source text |
 | 2026-09-08 | D3, AC-12.2 | Corpus described as "LinkedIn's IT, engineering, analytics, QA and science job functions" rather than "tech roles"; REQ-12 charts must carry that label | Decision: keep the ~75% non-software rows rather than filter them. They cannot reach a top-5 — near-zero on required-skill overlap, title match, and both semantic components — so the match score already handles relevance. A core-vs-generic skill split was considered and rejected as unnecessary work. The residual obligation is descriptive accuracy, not filtering |
 | 2026-09-08 | AC-1.2 (REQ-1 → FROZEN v1.2) | Title branch of AC-1.1 narrowed to compounds only and made precision-oriented; the `TECH_CODES` branch stays recall-oriented. Sales Engineer changed from a retention example to a drop example | Measured after phase 1a ran: the title branch contributed 6,157 rows of which only 18% were software/data — financial analysts (131), board-certified behavior analysts (67), office administrators (76), data entry clerks (31). It was widening the net rather than recovering miscoded tech roles, which was its stated purpose. Corpus 36,811 → 31,696 |
 | 2026-09-08 | AC-1.3 (REQ-1 → FROZEN v1.1) | Dedupe key changed from `title_normalized` (seniority-stripped) to `title_key` (seniority preserved) | Found while implementing phase 1a: the frozen wording merged "Senior Data Engineer" and "Data Engineer" at the same company and location into a single row. Those are distinct openings, and the loss would have been silent — the dedupe drop count would simply have been higher, with nothing to indicate real postings had been destroyed. `title_normalized` still strips seniority for AC-1.1 and AC-9.7 |
