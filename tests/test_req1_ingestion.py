@@ -58,11 +58,11 @@ def test_ac_1_1_retained_by_code_alone(scoped):
 
 def test_ac_1_1_retained_by_title_alone(scoped):
     """
-    AC-1.1: retention is code OR title. Job 6 is coded SALE (not a tech code)
-    but its title matches the whitelist, so the OR branch must retain it.
+    AC-1.1 / AC-1.2 v1.2: retention is code OR title. Job 21 is a genuinely
+    technical role coded MGMT — exactly what the title branch exists to recover.
     """
-    assert "SALE" not in TECH_CODES
-    assert 6 in set(scoped.frame["job_id"]), "title-regex branch of the OR is not firing"
+    assert "MGMT" not in TECH_CODES
+    assert 21 in set(scoped.frame["job_id"]), "title-regex branch of the OR is not firing"
 
 
 # ---------------------------------------------------------------- AC-1.2
@@ -76,21 +76,22 @@ def test_ac_1_2_non_tech_postings_dropped(scoped):
         assert job_id not in ids, f"{what} must not survive tech scoping"
 
 
-def test_ac_1_2_recall_over_precision_is_asserted(scoped):
+def test_ac_1_2_branches_have_different_postures(scoped):
     """
-    AC-1.2: recall-over-precision is deliberate, not incidental. A Sales Engineer
-    (SALE code, engineer title) and a Mechanical Engineer (ENG code, non-software)
-    both survive. AC-2.6's zero-skill drop is the real precision filter.
+    AC-1.2 v1.2: the two branches of the OR are deliberately asymmetric.
+    TECH_CODES is recall-oriented (ENG covers all engineering, so a Mechanical
+    Engineer survives and AC-2.6 removes it later). The title branch is
+    precision-oriented (compounds only), so a Sales Engineer coded SALE is dropped.
     """
     ids = set(scoped.frame["job_id"])
-    assert 6 in ids, "Sales Engineer must survive — documented recall-over-precision choice"
-    assert 7 in ids, "Mechanical Engineer must survive — ENG covers all engineering"
+    assert 7 in ids, "Mechanical Engineer must survive — ENG branch is recall-oriented"
+    assert 6 not in ids, "Sales Engineer must be dropped — title branch is precision-oriented"
     assert 15 not in ids, "Construction PM: MGMT code and no title-regex match — correctly dropped"
 
 
 def test_ac_1_2_scoping_counts_are_reported(scoped):
     """AC-1.2 / AC-1.8: the funnel records what happened at each stage."""
-    assert scoped.n_raw == 20
+    assert scoped.n_raw == 21
     assert scoped.n_after_scoping < scoped.n_raw
     assert scoped.n_after_dedupe <= scoped.n_after_scoping
 
@@ -163,7 +164,7 @@ def test_normalize_title_keeps_meaningful_words():
 @pytest.mark.parametrize("title", [
     "data engineer", "software engineer", "data analyst", "machine learning scientist",
     "qa automation engineer", "cloud infrastructure architect", "full stack developer",
-    "security analyst", "database administrator", "sales engineer",
+    "security analyst", "database administrator", "software engineering manager",
 ])
 def test_is_tech_title_accepts(title):
     assert is_tech_title(title)
@@ -172,6 +173,10 @@ def test_is_tech_title_accepts(title):
 @pytest.mark.parametrize("title", [
     "registered nurse", "warehouse associate", "worship leader",
     "physical therapist", "barista", "account executive",
+    # AC-1.2 v1.2: bare role words are noise, measured on the real corpus
+    "sales engineer", "financial analyst", "board certified behavior analyst",
+    "office administrator", "data entry clerk", "technical writer",
+    "process engineer", "mechanical engineer",
 ])
 def test_is_tech_title_rejects(title):
     assert not is_tech_title(title)

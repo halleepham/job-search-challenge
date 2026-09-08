@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.1, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
+**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.2, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -121,7 +121,7 @@ numbers and a grader must be able to read them without running the pipeline.
 
 ## REQ-1: Job data ingestion and corpus construction
 
-**Status:** FROZEN v1.1 (2026-09-08)
+**Status:** FROZEN v1.2 (2026-09-08)
 **Traces to:** report §5 (Big Data Collection, Storage, and Processing), §1 (big data goal)
 **Tests:** `tests/test_req1_ingestion.py`
 
@@ -179,10 +179,23 @@ Normalized job schema:
   job) and contains ids absent from `postings.csv`, so the join **must be a semi-join or be
   deduplicated to one row per posting** — a naive inner join fans rows out. The code set alone
   yields 33,502 postings (27% of the corpus); measured 2026-09-08.
-- **AC-1.2** — Given a fixture of 20 postings spanning tech and non-tech job functions, scoping
-  retains exactly the tech ones. Non-tech postings that match the title regex (e.g. a
-  "Sales Engineer") are retained; this is a deliberate recall-over-precision choice and is
-  asserted, not incidental. Measured: only ~55% of the `TECH_CODES` set has a software/data title
+- **AC-1.2** — Given a fixture of postings spanning tech and non-tech job functions, scoping retains
+  exactly the tech ones. **The two branches of AC-1.1's OR have deliberately different postures, and
+  both are asserted, not incidental:**
+  - The **`TECH_CODES` branch is recall-oriented.** `ENG` covers every engineering discipline, so a
+    Mechanical Engineer survives scoping. This is accepted because AC-2.6 (drop postings with zero
+    gazetteer skills) is the real precision filter.
+  - The **title branch is precision-oriented**: compounds only (`data engineer`, `database
+    administrator`, `systems analyst`), never bare `engineer`, `analyst`, `administrator`,
+    `technical`, `data`, or `it`. Its purpose is to recover genuinely technical roles miscoded
+    outside `TECH_CODES` — e.g. a "Software Engineering Manager" coded `MGMT` — not to widen the net.
+    A "Sales Engineer" coded `SALE` is therefore **dropped**.
+
+  Amended v1.2 (2026-09-08). The original wording made the title branch recall-oriented too and named
+  Sales Engineer as a retention example. Measurement refuted it: that branch contributed 6,157 rows of
+  which only 18% were software/data, pulling in financial analysts (131), board-certified behavior
+  analysts (67), office administrators (76), and data entry clerks (31). It was adding noise, not
+  recovering miscoded tech roles. Measured: only ~55% of the `TECH_CODES` set has a software/data title
   — `ENG` covers all engineering disciplines, so service technicians and construction project
   managers survive scoping. This is acceptable because **AC-2.6 is the real precision filter**:
   those postings match no gazetteer skill, extract zero skills, and are dropped. A consequence
@@ -874,6 +887,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | AC-1.2 (REQ-1 → FROZEN v1.2) | Title branch of AC-1.1 narrowed to compounds only and made precision-oriented; the `TECH_CODES` branch stays recall-oriented. Sales Engineer changed from a retention example to a drop example | Measured after phase 1a ran: the title branch contributed 6,157 rows of which only 18% were software/data — financial analysts (131), board-certified behavior analysts (67), office administrators (76), data entry clerks (31). It was widening the net rather than recovering miscoded tech roles, which was its stated purpose. Corpus 36,811 → 31,696 |
 | 2026-09-08 | AC-1.3 (REQ-1 → FROZEN v1.1) | Dedupe key changed from `title_normalized` (seniority-stripped) to `title_key` (seniority preserved) | Found while implementing phase 1a: the frozen wording merged "Senior Data Engineer" and "Data Engineer" at the same company and location into a single row. Those are distinct openings, and the loss would have been silent — the dedupe drop count would simply have been higher, with nothing to indicate real postings had been destroyed. `title_normalized` still strips seniority for AC-1.1 and AC-9.7 |
 | 2026-09-08 | AC-5.1, AC-5.2 | Dense vector now embeds `title + description` (skills excluded); BM25 indexes `title + skills + description` untruncated. Token limit corrected 512 → 256 | Two problems found when caching the model: the stated 512-token maximum was wrong (`all-MiniLM-L6-v2` is 256), and AC-5.1 contradicted AC-9.12 by embedding skills that already have their own score components. Splitting the two indexes resolves both at no cost and gives a better division of labor — the dense vector stops duplicating what BM25 does well |
 | 2026-09-08 | AC-4.1 | Résumé chunking simplified from heading-driven semantic sections to paragraph blocks | Scope trim against a 3-day deadline. Résumés are already visually blocked, so paragraph splits land on nearly the same boundaries; heading detection across arbitrary résumé formats is brittle and would have been REQ-4's largest source of edge cases for no measurable retrieval gain. Capability unchanged |

@@ -31,16 +31,25 @@ from duckdb.typing import BOOLEAN, VARCHAR
 #: exactly right for domain scoping (D3).
 TECH_CODES = frozenset({"IT", "ENG", "ANLS", "QA", "SCI"})
 
-#: Title whitelist for the OR branch of AC-1.1. Deliberately generous: AC-1.2
-#: documents recall-over-precision here because AC-2.6 (drop postings with zero
-#: gazetteer skills) is the real precision filter.
+#: Title whitelist for the OR branch of AC-1.1, for tech roles miscoded outside
+#: TECH_CODES. Tightened 2026-09-08 after measuring the first version: bare
+#: `analyst`, `administrator`, `technical`, `data`, and `it` contributed 6,157 rows
+#: of which only 18% were software/data - pulling in financial analysts (131),
+#: board-certified behavior analysts (67), office administrators (76), and data
+#: entry clerks (31). Those five now appear only in compounds. AC-1.2's
+#: recall-over-precision stance still holds for the TECH_CODES branch, where
+#: AC-2.6 (drop postings with zero gazetteer skills) is the real precision filter.
 TECH_TITLE_PATTERN = (
-    r"engineer|developer|programmer|software|analyst|analytics|scientist|architect"
-    r"|administrator|devops|\bsre\b|site reliability|cloud|security|infrastructure"
-    r"|platform|machine learning|\bml\b|\bai\b|full[ -]?stack|front[ -]?end"
-    r"|back[ -]?end|database|\bdba\b|\bqa\b|quality assurance|network|sysadmin"
-    r"|systems admin|information technology|\bit\b|technical|python|\bjava\b"
-    r"|\bdata\b"
+    # Unambiguous role words
+    r"software|developer|programmer|devops|\bsre\b|site reliability|full[ -]?stack"
+    r"|front[ -]?end|back[ -]?end|machine learning|\bml engineer\b|data scien"
+    r"|analytics engineer|business intelligence|cyber|penetration test"
+    # Compounds only - the bare forms of these are noise (measured 2026-09-08)
+    r"|data (engineer|analyst|architect|warehouse)|database administrator|\bdba\b"
+    r"|systems? (analyst|administrator|engineer)|network engineer"
+    r"|\bcloud\b|security engineer|security analyst|information technology"
+    r"|\bqa\b|quality assurance (engineer|analyst)|test engineer|\betl\b"
+    r"|platform engineer|infrastructure engineer|solutions architect|web develop"
 )
 _TECH_TITLE_RE = re.compile(TECH_TITLE_PATTERN)
 

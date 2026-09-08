@@ -19,3 +19,4 @@ job_id,title,company_name,location,description
 18,Security Analyst,SecureNet,"Washington, DC",SOC monitoring
 19,Barista,CoffeeCo,"Portland, OR",Prepare beverages
 20,Database Administrator,DataHouse,"Phoenix, AZ",Postgres administration
+21,Software Engineering Manager,Startly,"Remote",Lead the platform team
