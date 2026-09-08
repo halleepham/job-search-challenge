@@ -36,7 +36,6 @@ PACKAGES = [
 
 MODELS = [
     ("sentence-transformers/all-MiniLM-L6-v2", "AC-4.3 embeddings"),
-    ("cross-encoder/ms-marco-MiniLM-L-6-v2", "AC-8.1 reranker (stretch)"),
 ]
 
 results: list[tuple[str, str, str]] = []

@@ -13,7 +13,7 @@ kagglehub==1.0.2         # dataset download. NOT the `kaggle` CLI: as of 1.7.4.5
                          # accepts legacy username+key, and Kaggle now issues a single API token.
 datasets==3.0.1
 
-# --- Retrieval & matching (REQ-4, REQ-5, REQ-7, REQ-8, REQ-9) ---
+# --- Retrieval & matching (REQ-4, REQ-5, REQ-7, REQ-9) ---
 sentence-transformers==3.1.1
 faiss-cpu==1.8.0.post1
 rank-bm25==0.2.2

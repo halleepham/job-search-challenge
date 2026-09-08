@@ -49,7 +49,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 | D7 | **Experience is graded with an asymmetric curve** | Under-qualification is a screening barrier; over-qualification is a preference mismatch. The penalty is therefore gentler on the surplus side and floored well above zero | Symmetric penalty; no over-qualification handling (draft §8.1) |
 | D8 | **Semantic scores are calibrated against a fixed background distribution** | Pool-relative min-max makes every score depend on every other candidate, so adding one job reorders the top 5 and no acceptance criterion can assert a score value | Pool-relative min-max (draft §8.2); a fixed rescaling multiplier (Stage 2 AI code) |
 | D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
-| D10 | **The cross-encoder is a pruner, not a scored component** | A cross-encoder score is an undecomposable relevance number. Including it in the match score would import an unexplainable term into the one artifact that must be explainable | Cross-encoder as a weighted score component (draft §6.5 evaluates it this way) |
+| D10 | **No cross-encoder. Removed entirely (REQ-8 → Non-Goals)** | Accepted from the AI at Stage 2, removed at Stage 3 once filter-first (D2) made it redundant. The assignment never asks for reranking — report §6 and §9 name BM25, embeddings and hybrid retrieval only. In this architecture it would trim 200 candidates to 50 before scoring, but scoring 200 costs milliseconds, and jobs that survive retrieval without merit simply score low and never reach the top 5. It saves no meaningful compute and duplicates work the scorer already does. It also carries an opacity cost either way: as a score component it would put an unjustifiable term inside the breakdown, and as a pruner it can silently drop a good job with no signal to the user — pruning relocates that opacity rather than removing it | Cross-encoder as a weighted score component (unexplainable term in the score); cross-encoder as a pruner (retained the opacity, earned too little to justify it) |
 | D11 | **No LLM in the application. Evidence is retrieved, not generated** | Every number and every quote the user sees is produced by deterministic code: scores from REQ-9, supporting résumé text from REQ-4's semantic retrieval with verifiable character spans. The co-design prep's "Practice with Agentic AI" section was a prompt-engineering exercise — practice at directing an AI — not a component of the product, and building it in would have added an API key, a cost, and a reproducibility barrier (a grader cannot run it) for something the assignment never required. Report §6 asks about an LLM's role only *if* one is used | A hosted LLM explanation layer (removed, see REQ-10); LLM-computed scores (drift between runs, untestable) |
 | D12 | **Industry is dropped from the score** | Scope, not data quality. Stage 1 gave it only 0.10 of the manual score, and the deadline does not allow a component that small to earn its implementation and test cost. **Correction (2026-09-08):** this decision was originally justified as "industry labels are inconsistent across sources" — the schema audit refuted that. `job_industries.csv` is 0% null on both columns and `mappings/industries.csv` carries 422 clean industry names. The data is good; the reason for dropping it is priority. Recorded as an explicit rejection, not an omission, and a strong candidate for report §12 future work | Keeping the Stage 1 industry component |
 
@@ -87,13 +87,10 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
   (2) RETRIEVAL      BM25 + dense over survivors, fused with RRF → top 200
          │
          ▼
-  (3) PRUNE          cross-encoder → top 50                            [D10, stretch]
+  (3) SCORE          8-component weighted score, calibrated semantics  [D8]
          │
          ▼
-  (4) SCORE          8-component weighted score, calibrated semantics  [D8]
-         │
-         ▼
-  (5) RANK → top 5 ─→ (6) EVIDENCE  retrieve supporting résumé chunks per job  [D11]
+  (4) RANK → top 5 ─→ (5) EVIDENCE  retrieve supporting résumé chunks per job  [D11]
                               │
                               ▼
                      Results page (REQ-11) · Analytics page (REQ-12)
@@ -573,28 +570,37 @@ a single candidate list.
 
 ---
 
-## REQ-8: Cross-encoder pruning
+## REQ-8: ~~Cross-encoder pruning~~ — **REMOVED**
 
-**Status:** DRAFT — **stretch scope** (see Non-Goals)
-**Traces to:** report §4 (co-design enhancements), §9 (method comparison)
-**Tests:** `tests/test_req8_rerank.py`
+**Status:** REMOVED 2026-09-08 (never implemented; no code was written against it)
 
-**Description:**
-A cross-encoder scores the (profile, job) pairs jointly and cuts the candidate list from 200 to 50.
-Its scores are used **only** to prune (D10); the final ordering is set entirely by REQ-9.
+Specified a cross-encoder scoring (profile, job) pairs jointly to trim the candidate list from 200
+to 50 before scoring. Removed from scope; the number is retained rather than reused.
 
-**Acceptance Criteria:**
+**Why.** It was accepted at Stage 2 from the AI's recommendation *"add a reranker + feedback →
+re-rank loop"* (co-design prep §1). The feedback half was already cut; this is the other half.
 
-- **AC-8.1** — `cross-encoder/ms-marco-MiniLM-L-6-v2` scores each candidate pair and the top 50 are
-  retained.
-- **AC-8.2** — Cross-encoder scores do not appear in the match score, in the component breakdown, or
-  anywhere in the UI. They are a pruning signal, not an explanation.
-- **AC-8.3** — The stage is toggleable by a single flag so REQ-13 can measure the pipeline with and
-  without it.
-- **AC-8.4** — Pruning 200 candidates completes in under 5 seconds on CPU.
-- **AC-8.5** — If measurement shows the stage does not change the final top 5, that is recorded as a
-  finding and the stage is disabled by default. A layer that does not earn its latency is removed,
-  not kept for appearances.
+Three reasons it does not earn its place:
+
+1. **The assignment does not ask for it.** Report §6 (methods) and §9 (evaluation) name BM25,
+   embeddings, and hybrid retrieval. Reranking appears nowhere in the instructions.
+2. **Filter-first made it redundant (D2).** Candidates are already restricted to jobs the user is
+   eligible for, and the weighted score ranks them. Trimming 200 → 50 saves nothing measurable —
+   scoring 200 candidates is eight arithmetic components plus one cosine max over ~10 résumé chunks
+   — and a job that survives retrieval without merit scores low and never reaches the top 5.
+3. **It carries an opacity cost in either role.** As a score component it puts a term in the
+   breakdown that cannot be justified to the user. As a pruner it can silently drop a job the user
+   would have wanted, with no signal and no recourse. Pruning relocates the opacity rather than
+   removing it — the argument for it was only ever that retrieval is already opaque while the score
+   need not be.
+
+**What is kept:** AC-13.1's retrieval comparison still runs BM25 vs. dense vs. hybrid RRF, which is
+exactly what report §9 names. The `ms-marco` model is already cached, so this could be revisited if
+the evaluation shows hybrid retrieval underperforming — but it would have to earn its way back in
+on measured evidence.
+
+**Report value:** an AI recommendation accepted at Stage 2 and reversed at Stage 3 with a measured
+reason is stronger evidence of critical evaluation than shipping it would have been (report §4).
 
 ---
 
@@ -806,7 +812,7 @@ compliance*.
 **Acceptance Criteria:**
 
 - **AC-13.1** — **Retrieval comparison** over the configurations built — BM25 only, dense only,
-  hybrid RRF (plus cross-encoder pruning only if REQ-8 ships) — reporting precision@10 on the
+  hybrid RRF — reporting precision@10 on the
   **unfiltered** corpus, which is the honest way to compare retrieval methods.
   **Judgments are pooled, not pre-labeled:** run every configuration for one profile, take the union
   of their top-10s (typically 15-25 distinct jobs after overlap), and judge each job once as
@@ -815,7 +821,7 @@ compliance*.
   under-credit a configuration for surfacing a good job nobody thought to label.
 - **AC-13.2** — **End-to-end evaluation** with filters enabled, reporting the top 5 for each of the
   three preset profiles from AC-3.7.
-- **AC-13.3** — **Latency**, measured per stage (filter, retrieve, prune, score, evidence) as median and
+- **AC-13.3** — **Latency**, measured per stage (filter, retrieve, score, evidence) as median and
   p95 over ≥20 runs.
 - **AC-13.4** — **Scalability**: the ingestion job is timed over increasing corpus sizes — the ~30k
   tech subset, the full ~124k LinkedIn corpus, and the ~786k-row `data_jobs` corpus — and plotted,
@@ -873,13 +879,13 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 - Live geocoding APIs; persisted cross-session state; user accounts; real-time job APIs.
 
 **Stretch — build only if the must-ship list is complete:**
-- REQ-8 cross-encoder pruning.
 - Local Hugging Face narrative generation over the already-retrieved evidence (REQ-10 stretch note).
+- Cross-encoder reranking or pruning (REQ-8, removed — see D10).
 - LLM-based résumé field extraction (manual entry is the guaranteed path).
 - A PySpark implementation of the ingestion job, for the engine-comparison timing in AC-13.4.
 - Lazy explanation generation below the top 5.
 
-**Must ship:** REQ-1 through REQ-7, REQ-9, and REQ-11 through REQ-14. (REQ-8 is stretch; REQ-10 is removed.)
+**Must ship:** REQ-1 through REQ-7, REQ-9, and REQ-11 through REQ-14. (REQ-8 and REQ-10 are removed.)
 
 ---
 
@@ -900,6 +906,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-08 | REQ-8 (removed), D10, AC-13.1, AC-13.3, Non-Goals | Cross-encoder removed entirely rather than kept as a stretch pruner | Not asked for by the assignment (§6 and §9 name BM25, embeddings and hybrid only); made redundant by filter-first (D2), since scoring 200 candidates costs milliseconds and unmeritorious jobs score low anyway; and opaque in either role — as a score component it adds an unjustifiable term to the breakdown, as a pruner it can silently drop a good job. Accepted from the AI at Stage 2 and reversed here on measured reasoning |
 | 2026-09-08 | AC-1.6 (REQ-1 → FROZEN v1.3) | Experience regex now captures ranges and takes the lower bound | The frozen regex took the upper bound: "4-7 years related business experience" parsed as 7. The field is a *minimum*, so every ranged requirement was overstated, and AC-9.5 turns an inflated `job_min_years` into a wider `gap` — penalising candidates who actually qualify. Caught by sampling parsed output against source text |
 | 2026-09-08 | D3, AC-12.2 | Corpus described as "LinkedIn's IT, engineering, analytics, QA and science job functions" rather than "tech roles"; REQ-12 charts must carry that label | Decision: keep the ~75% non-software rows rather than filter them. They cannot reach a top-5 — near-zero on required-skill overlap, title match, and both semantic components — so the match score already handles relevance. A core-vs-generic skill split was considered and rejected as unnecessary work. The residual obligation is descriptive accuracy, not filtering |
 | 2026-09-08 | AC-1.2 (REQ-1 → FROZEN v1.2) | Title branch of AC-1.1 narrowed to compounds only and made precision-oriented; the `TECH_CODES` branch stays recall-oriented. Sales Engineer changed from a retention example to a drop example | Measured after phase 1a ran: the title branch contributed 6,157 rows of which only 18% were software/data — financial analysts (131), board-certified behavior analysts (67), office administrators (76), data entry clerks (31). It was widening the net rather than recovering miscoded tech roles, which was its stated purpose. Corpus 36,811 → 31,696 |
