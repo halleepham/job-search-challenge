@@ -24,6 +24,8 @@ import duckdb
 import pandas as pd
 from duckdb.typing import BOOLEAN, VARCHAR
 
+from src.skills import extract_skills, load_vocabulary, split_sections
+
 # --- AC-1.1: named constants, not inlined -----------------------------------
 
 #: LinkedIn job-function codes retained as "tech". Measured 2026-09-08: these
@@ -413,7 +415,8 @@ CORPUS_SCHEMA = [
     "job_id", "title", "title_normalized", "company", "location_raw", "is_remote",
     "work_setting", "work_setting_inferred", "employment_type", "min_years_exp",
     "min_years_exp_source", "education_required", "salary_min", "salary_max",
-    "salary_listed", "salary_source", "description", "posted_date",
+    "salary_listed", "salary_source", "required_skills", "preferred_skills",
+    "n_required_skills", "description", "posted_date",
 ]
 
 
@@ -441,6 +444,34 @@ def build_corpus(
 
     df, field_stats = normalize_fields(raw)
 
+    # REQ-2: extract skills, then AC-2.6 drops postings with none.
+    vocab = load_vocabulary()
+    sections = df["description"].map(split_sections)
+    extracted = df.apply(
+        lambda r: extract_skills(r.get("description"), r.get("skills_desc"), vocab),
+        axis=1, result_type="expand",
+    )
+    df["required_skills"] = extracted[0].map(sorted)
+    df["preferred_skills"] = extracted[1].map(sorted)
+    df["n_required_skills"] = df["required_skills"].str.len()
+
+    skill_stats = {
+        "pct_with_required_section": round(
+            100 * sections.map(lambda x: bool(x["required"])).mean(), 1),
+        "pct_with_preferred_section": round(
+            100 * sections.map(lambda x: bool(x["preferred"])).mean(), 1),
+        "pct_with_preferred_skills": round(
+            100 * df.loc[df.n_required_skills > 0, "preferred_skills"].str.len().gt(0).mean(), 1),
+        "median_required_skills": int(
+            df.loc[df.n_required_skills > 0, "n_required_skills"].median()),
+        "pct_with_one_required_skill": round(
+            100 * df.loc[df.n_required_skills > 0, "n_required_skills"].eq(1).mean(), 1),
+    }
+
+    n_before_skills = len(df)
+    df = df[df["n_required_skills"] > 0].copy()      # AC-2.6
+    n_zero_skill_dropped = n_before_skills - len(df)
+
     df = df.rename(columns={"company_name": "company", "location": "location_raw"})
     df["is_remote"] = df["work_setting"].eq("Remote")
     df["posted_date"] = pd.to_datetime(
@@ -457,15 +488,14 @@ def build_corpus(
             "raw_load": scoped.n_raw,
             "after_tech_scoping": scoped.n_after_scoping,
             "after_dedupe": scoped.n_after_dedupe,
-            "after_employment_filter": n_final,
-            # AC-2.6 owns this stage. Left null rather than faked so the gap is
-            # visible in the artifact the report cites.
-            "after_zero_skill_drop": None,
+            "after_employment_filter": n_before_skills,
+            "after_zero_skill_drop": n_final,
         },
         "dropped": {
             "non_tech": scoped.n_dropped_non_tech,
             "duplicates": scoped.n_dropped_duplicates,
             "excluded_employment_type": field_stats["n_excluded_employment_type"],
+            "zero_skill": n_zero_skill_dropped,
         },
         "coverage_pct": {
             "salary_min": round(100 * df["salary_min"].notna().mean(), 1),
@@ -475,10 +505,13 @@ def build_corpus(
             "work_setting_known": round(100 * df["work_setting"].ne("Unknown").mean(), 1),
             "skills_desc": skills_desc_pct,
         },
-        "salary_source": field_stats["salary_source"],
-        "min_years_exp_source": field_stats["min_years_exp_source"],
-        "work_setting": field_stats["work_setting"],
-        "employment_type": field_stats["employment_type"],
+        "skills": skill_stats,
+        # Every distribution below is computed from the FINAL corpus, after all
+        # drops, so it describes the same population as coverage_pct above.
+        "salary_source": df["salary_source"].value_counts().to_dict(),
+        "min_years_exp_source": df["min_years_exp_source"].value_counts().to_dict(),
+        "work_setting": df["work_setting"].value_counts().to_dict(),
+        "employment_type": df["employment_type"].value_counts().to_dict(),
     }
 
     df.to_parquet(out_dir / "jobs_tech.parquet", index=False)
@@ -504,9 +537,18 @@ def main() -> None:
     print(f"  - duplicates dropped      {result.n_dropped_duplicates:>8,}")
     print(f"  = corpus                  {result.n_after_dedupe:>8,}   ({pct:.1f}% of raw)")
     print(f"  - non-job types dropped   {d['excluded_employment_type']:>8,}   (AC-1.6a)")
-    print(f"  = corpus after 1b         {len(df):>8,}")
+    print(f"  - zero-skill dropped      {d['zero_skill']:>8,}   (AC-2.6)")
+    print(f"  = CORPUS                  {len(df):>8,}")
+    k = stats["skills"]
+    print("\nREQ-2 skill extraction (AC-2.6, AC-2.7)")
+    print("-" * 52)
+    print(f"  parsed required section   {k['pct_with_required_section']:>7}%")
+    print(f"  parsed preferred section  {k['pct_with_preferred_section']:>7}%")
+    print(f"  has preferred skills      {k['pct_with_preferred_skills']:>7}%")
+    print(f"  median required skills    {k['median_required_skills']:>7}")
+    print(f"  exactly 1 required skill  {k['pct_with_one_required_skill']:>7}%")
 
-    print("\nREQ-1 phase 1b field coverage (AC-1.4 - AC-1.7)")
+    print("\nREQ-1 field coverage over the FINAL corpus (AC-1.4 - AC-1.7)")
     print("-" * 52)
     print(f"  salary listed             {stats['coverage_pct']['salary_min']:>7}%")
     for k, v in stats["salary_source"].items():
@@ -522,7 +564,7 @@ def main() -> None:
     for k, v in stats["employment_type"].items():
         print(f"      {k:<24}{v:>8,}")
     print("\n  wrote data/processed/jobs_tech.parquet  and  coverage_stats.json")
-    print("\nNote: final corpus size is set by AC-2.6 (gazetteer coverage), not by this stage.")
+
 
 
 if __name__ == "__main__":

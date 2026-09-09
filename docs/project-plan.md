@@ -265,7 +265,7 @@ which is what makes the optional engine comparison in AC-13.4 cheap.
 
 ## REQ-2: Skill vocabulary and extraction
 
-**Status:** FROZEN v1.0 (2026-09-08)
+**Status:** FROZEN v1.0 (2026-09-08) — **IMPLEMENTED**, all ACs pass (60 tests)
 **Traces to:** report §5 (skill extraction, feature construction), §6 (skill similarity)
 **Tests:** `tests/test_req2_skills.py`
 
@@ -639,6 +639,20 @@ semantic split is carried over from the Stage 2 co-design prep unchanged, so the
   Stage 2 AI design — a "kept" item for report §4.)
 - **AC-9.3** — **Required-skill overlap** = `|matched_required| / |required|`, computed by exact set
   membership on normalized canonical terms (AC-2.2). Substring matching is prohibited.
+  **Evidence damping (added 2026-09-09):** the ratio is multiplied by
+  `min(1, |required| / 3)`, so a posting stating one requirement caps at 0.33 and one stating two
+  caps at 0.67; three or more is unaffected.
+  Measured on the built corpus, **27.1% of postings yield exactly one required skill** and 43.1%
+  yield two or fewer. Undamped, a posting listing one skill you happen to have scores a perfect 1.0
+  on the heaviest component — beating a posting listing ten of which you match eight (0.80). The
+  thin posting wins on far weaker evidence, which inverts the ranking the component exists to
+  produce. Damping is a confidence discount on the *evidence*, not a penalty on the job:
+  **a ratio computed from one observation should not carry the same weight as one computed from
+  ten.** Explained to the user as: "this posting states only one requirement, so we are less
+  confident in the match."
+  Rejected alternative: raising AC-2.6's floor from >=1 to >=3 required skills, which would delete a
+  further 56.3% of the corpus. A posting with one extracted skill may simply use vocabulary the
+  gazetteer lacks — discounting confidence is honest, deleting the job is not.
 - **AC-9.4** — **Preferred-skill overlap** = `|matched_preferred| / |preferred|`. When `preferred` is
   empty, the component is **dropped and the remaining seven weights are renormalized to sum to 1.0**
   for that job. It is never defaulted to 1.0 (inflates) or 0.0 (punishes a data gap).
@@ -893,12 +907,13 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | # | Question | Blocks | Resolution path |
 |---|---|---|---|
-| Q1 | Does the preferred-skill weight of 8% survive AC-2.7's coverage measurement? | Freezing REQ-9 | Measure during REQ-2, revise REQ-9 via the spec-change protocol if coverage is under ~20% |
+| ~~Q1~~ | ~~Does the preferred-skill weight of 8% survive AC-2.7's coverage measurement?~~ **CLOSED 2026-09-09** — measured 7.0% of postings yield preferred skills. **No change needed:** AC-9.4 already drops the component and renormalizes the other seven weights when preferred is empty, so on 93% of jobs the 8% redistributes automatically and the component fires only where it has data. The measurement instead quantifies the Stage 2 AI defect — its `if preferred_skills else 1.0` would have awarded a perfect score to **93% of postings** | — | — |
 | Q2 | Are the two semantic components measuring one signal? | Final weights | AC-13.6 correlation check |
 | Q3 | Where is the single-machine/distributed crossover for this workload? | Nothing — reporting only | AC-13.4's optional PySpark comparison, if time allows; otherwise stated as a documented limitation |
 | Q4 | Is the ~30k tech corpus large enough for the retrieval comparison to differentiate methods? | AC-13.1 interpretation | Comparison runs unfiltered; if differences are marginal, that is itself a reportable finding |
 | Q6 | Is education's 4% weight still right at 58.5% coverage? | Freezing REQ-9 | The weight rested on an assumption measurement refuted (D6). Decide when REQ-9 is frozen, using AC-13.6's component-sensitivity run: if zeroing education changes no top-5, the low weight is right regardless of coverage; if it does, raise it |
-| Q5 | Does `matched/total_required` over-reward thin postings? A posting from which only one skill was extracted scores 1.0 on the heaviest component (30%) for matching that one skill, while a 7-skill posting matched in full scores the same | Whether AC-2.6 or AC-9.3 needs revising | AC-2.7's median-required-skills measurement decides it, inside REQ-2. If thin postings are rare, leave it. If common, either raise AC-2.6's floor from ≥1 to ≥3 skills, or damp the component by `× min(1, total_required/3)` so a 1-skill posting caps at 0.33. Note this is independent of D3's corpus decision — it applies equally in a pure software corpus |
+| ~~Q5~~ | ~~Does `matched/total_required` over-reward thin postings?~~ **CLOSED 2026-09-09** — yes. Measured: 27.1% of postings yield exactly one required skill. Resolved by evidence damping in AC-9.3, not by raising AC-2.6's floor | — | — |
+| ~~Q5-orig~~ | Does `matched/total_required` over-reward thin postings? A posting from which only one skill was extracted scores 1.0 on the heaviest component (30%) for matching that one skill, while a 7-skill posting matched in full scores the same | Whether AC-2.6 or AC-9.3 needs revising | AC-2.7's median-required-skills measurement decides it, inside REQ-2. If thin postings are rare, leave it. If common, either raise AC-2.6's floor from ≥1 to ≥3 skills, or damp the component by `× min(1, total_required/3)` so a 1-skill posting caps at 0.33. Note this is independent of D3's corpus decision — it applies equally in a pure software corpus |
 
 ---
 
@@ -906,6 +921,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-09 | AC-9.3 | Required-skill overlap damped by `min(1, \|required\| / 3)` | Measured on the built corpus: 27.1% of postings yield exactly one required skill, 43.1% two or fewer. Undamped, a one-skill posting scores 1.0 on the 30% component and outranks a ten-skill posting matched 8/10. A ratio from one observation should not weigh the same as one from ten. Rejected raising AC-2.6's floor to >=3, which would delete a further 56.3% of the corpus |
 | 2026-09-08 | REQ-8 (removed), D10, AC-13.1, AC-13.3, Non-Goals | Cross-encoder removed entirely rather than kept as a stretch pruner | Not asked for by the assignment (§6 and §9 name BM25, embeddings and hybrid only); made redundant by filter-first (D2), since scoring 200 candidates costs milliseconds and unmeritorious jobs score low anyway; and opaque in either role — as a score component it adds an unjustifiable term to the breakdown, as a pruner it can silently drop a good job. Accepted from the AI at Stage 2 and reversed here on measured reasoning |
 | 2026-09-08 | AC-1.6 (REQ-1 → FROZEN v1.3) | Experience regex now captures ranges and takes the lower bound | The frozen regex took the upper bound: "4-7 years related business experience" parsed as 7. The field is a *minimum*, so every ranged requirement was overstated, and AC-9.5 turns an inflated `job_min_years` into a wider `gap` — penalising candidates who actually qualify. Caught by sampling parsed output against source text |
 | 2026-09-08 | D3, AC-12.2 | Corpus described as "LinkedIn's IT, engineering, analytics, QA and science job functions" rather than "tech roles"; REQ-12 charts must carry that label | Decision: keep the ~75% non-software rows rather than filter them. They cannot reach a top-5 — near-zero on required-skill overlap, title match, and both semantic components — so the match score already handles relevance. A core-vs-generic skill split was considered and rejected as unnecessary work. The residual obligation is descriptive accuracy, not filtering |

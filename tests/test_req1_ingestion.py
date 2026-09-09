@@ -418,9 +418,9 @@ def test_ac_1_8_reports_funnel_counts(built):
     (_, stats), _ = built
     f = stats["funnel"]
     assert f["raw_load"] == 21
-    assert f["raw_load"] >= f["after_tech_scoping"] >= f["after_dedupe"] >= f["after_employment_filter"]
-    assert "after_zero_skill_drop" in f, "AC-2.6's stage must be present even before REQ-2 fills it"
-    assert f["after_zero_skill_drop"] is None, "unfilled until REQ-2 exists — not silently faked"
+    assert (f["raw_load"] >= f["after_tech_scoping"] >= f["after_dedupe"]
+            >= f["after_employment_filter"] >= f["after_zero_skill_drop"])
+    assert f["after_zero_skill_drop"] is not None, "AC-2.6 now fills this stage"
 
 
 def test_ac_1_8_reports_salary_path_counts(built):
@@ -428,7 +428,8 @@ def test_ac_1_8_reports_salary_path_counts(built):
     (_, stats), _ = built
     paths = stats["salary_source"]
     assert set(paths) <= {"normalized_salary", "derived", "non_usd", "none"}
-    assert sum(paths.values()) == stats["funnel"]["after_employment_filter"]
+    assert sum(paths.values()) == stats["funnel"]["after_zero_skill_drop"], \
+        "every distribution must describe the final corpus, not a pre-drop population"
 
 
 def test_ac_1_8_non_usd_is_counted_not_hidden(built):
