@@ -77,6 +77,75 @@ def precision_at_k(pool: pd.DataFrame, k: int = 10, label: str = "relevant_proxy
     return out
 
 
+def recall_of_top_scored(jobs, index, profile, kb, ks=(10, 25, 50, 100, 200),
+                        n_relevant: int = 20) -> pd.DataFrame:
+    """
+    AC-13.1 (v1.1): does retrieval surface the jobs that scoring would rank highest?
+
+    Score **every** filter survivor, take the true top-`n_relevant` by final match
+    score, then report each retrieval mode's recall@k against that set.
+
+    Not circular: retrieval ranks by BM25 and embedding similarity, scoring ranks
+    by eight weighted components including skills, experience, education and
+    location. The question is whether the cheap approximate stage keeps what the
+    expensive exact stage wants - which is the only thing the retrieval stage is
+    for.
+
+    Replaces a title-family relevance proxy that returned precision@10 = 1.00 for
+    both BM25 and hybrid on every profile, and so could not separate them.
+    """
+    from src.filters import apply_filters
+    from src.pipeline import search
+    from src.retrieval import retrieve
+
+    kept, _ = apply_filters(jobs, profile)
+    if kept.empty:
+        return pd.DataFrame()
+
+    # Exhaustive scoring of the survivors defines the ground truth.
+    full = search(jobs, index, profile, kb, top_n=n_relevant, retrieve_k=len(kept))
+    truth = {r["job_id"] for r in full.results}
+
+    position_of = {jid: i for i, jid in enumerate(jobs["job_id"])}
+    candidates = [position_of[j] for j in kept["job_id"]]
+
+    rows = []
+    for mode in ("bm25", "dense", "hybrid"):
+        ranked = retrieve(index, profile, candidate_positions=candidates,
+                          mode=mode, k=max(ks))
+        ids = [jobs.iloc[p]["job_id"] for p, _ in ranked]
+        for k in ks:
+            found = len(truth & set(ids[:k]))
+            rows.append({"mode": mode, "k": k,
+                         "recall": round(found / len(truth), 3) if truth else 0.0,
+                         "found": found, "of": len(truth)})
+    return pd.DataFrame(rows)
+
+
+def sensitivity_all_profiles(jobs, index, presets, kbs) -> pd.DataFrame:
+    """
+    AC-13.6 (v1.1): component sensitivity across every reference profile.
+
+    A single profile's result is not a property of the weight. The data-science
+    profile's top results are mostly remote, so location is constant *for it* -
+    a profile that rejects remote would see the same component discriminate.
+    """
+    frames = []
+    for key, profile in presets.items():
+        frame = component_sensitivity(jobs, index, profile, kbs[key])
+        frame.insert(0, "profile", profile.name)
+        frames.append(frame)
+    combined = pd.concat(frames, ignore_index=True)
+    combined["jobs_replaced"] = 5 - combined["top5_overlap"]
+    summary = (combined.groupby("component")
+               .agg(weight=("weight", "first"),
+                    mean_jobs_replaced=("jobs_replaced", "mean"),
+                    profiles_affected=("order_changed", "sum"),
+                    n_profiles=("order_changed", "size"))
+               .reset_index().sort_values("mean_jobs_replaced", ascending=False))
+    return combined, summary
+
+
 def latency_profile(jobs, index, profile, kb, runs: int = 20) -> pd.DataFrame:
     """AC-13.3: per-stage median and p95 over repeated searches."""
     from src.pipeline import search

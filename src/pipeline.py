@@ -25,9 +25,18 @@ from src.profiles import UserProfile
 from src.retrieval import retrieve
 from src.scoring import score_job
 
-#: Candidates that receive full scoring. Retrieval is cheap and approximate;
-#: scoring is exact and explainable, so the shortlist only needs to be generous.
+#: Candidates that receive full scoring when retrieval is used.
 RETRIEVE_K = 200
+
+#: D13 - below this many filter survivors, skip retrieval and score all of them.
+#: Measured: scoring every survivor costs ~220 ms more than retrieving 200 and
+#: produced an identical top-5 for all three reference profiles, while retrieval
+#: at k=200 recovered only 45-95% of the true top-20 by score (AC-13.1). Exact is
+#: available for the price of a fifth of a second, so approximation is not worth
+#: its recall loss at this corpus size. Retrieval remains for scalability - the
+#: same argument as D9 choosing DuckDB over Spark: use the approximate machinery
+#: when the data demands it, and measure rather than assume that it does.
+SCORE_ALL_THRESHOLD = 2500
 TOP_N = 5
 
 
@@ -62,7 +71,13 @@ def search(
 
     t = time.perf_counter()
     candidates = [position_of[j] for j in kept["job_id"]]
-    hits = retrieve(index, profile, candidate_positions=candidates, mode=mode, k=retrieve_k)
+    if len(candidates) <= SCORE_ALL_THRESHOLD and mode == "hybrid":
+        # D13: exact - every eligible job is scored, no candidate is discarded.
+        hits = [(p, 0.0) for p in candidates]
+        funnel["retrieval"] = "skipped (scored every survivor)"
+    else:
+        hits = retrieve(index, profile, candidate_positions=candidates, mode=mode, k=retrieve_k)
+        funnel["retrieval"] = f"{mode} top-{retrieve_k}"
     timings["retrieve"] = (time.perf_counter() - t) * 1000
 
     # Semantic sub-scores, calibrated against the fixed background (AC-9.11).
@@ -111,15 +126,18 @@ def search(
     # from the source by character span - never generated.
     t = time.perf_counter()
     for result in top:
-        row = jobs.iloc[position_of[result["job_id"]]]
+        position = position_of[result["job_id"]]
+        row = jobs.iloc[position]
         result["job"] = row
         result["evidence"] = []
         if kb is not None and len(kb.chunks):
-            job_text = f"{row['title']}. {row['description'] or ''}"
+            # AC-9.10: the job's stored index vector, not a re-embedded copy of
+            # its text - so shown evidence and scored evidence are one measurement.
             result["evidence"] = [
                 {"text": chunk.text, "section": chunk.section,
                  "char_span": chunk.char_span, "similarity": round(sim, 3)}
-                for chunk, sim in kb.retrieve(job_text, k=2)
+                for chunk, sim in kb.retrieve_by_vector(
+                    index.embeddings[position], k=2, evidence_only=True)
             ]
     timings["evidence"] = (time.perf_counter() - t) * 1000
 

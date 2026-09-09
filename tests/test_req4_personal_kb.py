@@ -132,3 +132,25 @@ def test_ac_4_6_structured_and_unstructured_are_separate(kb):
 def test_ac_4_6_empty_input_is_handled():
     kb = PersonalKB.build(resume_text="", career_goals="Looking for data work.")
     assert len(kb.chunks) == 1 and kb.retrieve("anything", 3)
+
+
+def test_retrieve_by_vector_matches_retrieve(kb):
+    """
+    AC-9.10: passing the stored index vector must give the same ranking as
+    embedding the text — that equivalence is what makes the substitution safe.
+    """
+    text = "Build ETL pipelines in Airflow and Snowflake"
+    from src.personal_kb import embed
+
+    by_text = [c.text for c, _ in kb.retrieve(text, k=3)]
+    by_vector = [c.text for c, _ in kb.retrieve_by_vector(embed([text])[0], k=3)]
+    assert by_text == by_vector
+
+
+def test_retrieve_by_vector_can_exclude_goals(kb):
+    """AC-9.10: displayed evidence excludes the career-goals chunk, as the score does."""
+    from src.personal_kb import embed
+
+    vec = embed(["data pipelines"])[0]
+    sections = {c.section for c, _ in kb.retrieve_by_vector(vec, k=99, evidence_only=True)}
+    assert "career_goals" not in sections

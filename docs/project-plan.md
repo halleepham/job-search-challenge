@@ -51,6 +51,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 | D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
 | D10 | **No cross-encoder. Removed entirely (REQ-8 → Non-Goals)** | Accepted from the AI at Stage 2, removed at Stage 3 once filter-first (D2) made it redundant. The assignment never asks for reranking — report §6 and §9 name BM25, embeddings and hybrid retrieval only. In this architecture it would trim 200 candidates to 50 before scoring, but scoring 200 costs milliseconds, and jobs that survive retrieval without merit simply score low and never reach the top 5. It saves no meaningful compute and duplicates work the scorer already does. It also carries an opacity cost either way: as a score component it would put an unjustifiable term inside the breakdown, and as a pruner it can silently drop a good job with no signal to the user — pruning relocates that opacity rather than removing it | Cross-encoder as a weighted score component (unexplainable term in the score); cross-encoder as a pruner (retained the opacity, earned too little to justify it) |
 | D11 | **No LLM in the application. Evidence is retrieved, not generated** | Every number and every quote the user sees is produced by deterministic code: scores from REQ-9, supporting résumé text from REQ-4's semantic retrieval with verifiable character spans. The co-design prep's "Practice with Agentic AI" section was a prompt-engineering exercise — practice at directing an AI — not a component of the product, and building it in would have added an API key, a cost, and a reproducibility barrier (a grader cannot run it) for something the assignment never required. Report §6 asks about an LLM's role only *if* one is used | A hosted LLM explanation layer (removed, see REQ-10); LLM-computed scores (drift between runs, untestable) |
+| D13 | **Retrieval is skipped when the filter survivors fit; every eligible job is scored exactly** | Measured (AC-13.1 v1.1): retrieving top-200 recovered only **45-95%** of the true top-20 by score, so the approximate stage was discarding jobs the exact stage wanted. Scoring every survivor instead costs ~220 ms more (877 ms vs 656 ms for the largest profile) and produced an **identical top-5** for all three reference profiles. Exactness is available for a fifth of a second, so the approximation is not worth its recall loss at this corpus size. Retrieval is retained above `SCORE_ALL_THRESHOLD` and remains the scalability path — the same reasoning as D9: use the heavier machinery when the data demands it, and *measure* rather than assume that it does | Always retrieving top-200 (loses top-scoring jobs); removing retrieval entirely (would leave no path at larger scale, and forfeit the report §9 comparison) |
 | D12 | **Industry is dropped from the score** | Scope, not data quality. Stage 1 gave it only 0.10 of the manual score, and the deadline does not allow a component that small to earn its implementation and test cost. **Correction (2026-09-08):** this decision was originally justified as "industry labels are inconsistent across sources" — the schema audit refuted that. `job_industries.csv` is 0% null on both columns and `mappings/industries.csv` carries 422 clean industry names. The data is good; the reason for dropping it is priority. Recorded as an explicit rejection, not an omission, and a strong candidate for report §12 future work | Keeping the Stage 1 industry component |
 
 ### 0.4 Architecture
@@ -84,7 +85,8 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
   (1) HARD FILTERS   location · salary · work setting · employment type · skill floor   [D2]
          │                                                              ~30k → ~N
          ▼
-  (2) RETRIEVAL      BM25 + dense over survivors, fused with RRF → top 200
+  (2) RETRIEVAL      survivors ≤ 2,500 → skipped, all are scored exactly   [D13]
+                     otherwise → BM25 + dense over survivors, RRF → top 200
          │
          ▼
   (3) SCORE          8-component weighted score, calibrated semantics  [D8]
@@ -717,7 +719,10 @@ semantic split is carried over from the Stage 2 co-design prep unchanged, so the
 - **AC-9.9** — **Career goals ~ description** = calibrated cosine between the career-goals embedding
   and the job embedding.
 - **AC-9.10** — **Résumé evidence ~ description** = calibrated maximum cosine over the retrieved
-  personal chunks for that job, **excluding the career-goals chunk**, which has its own component
+  personal chunks for that job, computed against the job's **stored index vector** rather than a
+  freshly embedded copy of its text, so the evidence displayed to the user (AC-11.5) and the
+  evidence that produced this sub-score are provably the same measurement and cannot diverge —
+  **excluding the career-goals chunk**, which has its own component
   (AC-9.9). Without that exclusion the two semantic components returned identical values on most
   results — the goals chunk simply won the max — so 30% of the weight was one signal counted twice,
   exactly what AC-9.12 forbids. A profile with no résumé content beyond its goals statement yields
@@ -841,7 +846,7 @@ This is analysis *of the dataset*, distinct from the *result-level* charts in RE
 
 ## REQ-13: Evaluation notebook
 
-**Status:** FROZEN v1.0 (2026-09-09)
+**Status:** FROZEN v1.1 (2026-09-09)
 **Traces to:** report §9 (Results and Evaluation), §10 (comparison)
 **Location:** `notebooks/evaluation.ipynb`
 
@@ -854,11 +859,19 @@ compliance*.
 - **AC-13.1** — **Retrieval comparison** over the configurations built — BM25 only, dense only,
   hybrid RRF — reporting precision@10 on the
   **unfiltered** corpus, which is the honest way to compare retrieval methods.
-  **Judgments are pooled, not pre-labeled:** run every configuration for one profile, take the union
-  of their top-10s (typically 15-25 distinct jobs after overlap), and judge each job once as
-  relevant/not. Every configuration is then scored against that shared pool. This is both less
-  manual work than labeling a fixed set in advance and methodologically sounder — it cannot
-  under-credit a configuration for surfacing a good job nobody thought to label.
+  **Primary metric — recall of the top-scoring set (v1.1, 2026-09-09).** Score *every* filter
+  survivor, take the true top-20 by final match score, and report each retrieval method's
+  `recall@k` against that set: *does retrieval surface the jobs that scoring would rank highest?*
+  This needs no human labels, is not circular (retrieval and scoring use different signals — BM25
+  and embeddings versus eight weighted components), and answers the question the comparison exists
+  for: whether hybrid retrieval earns its cost.
+  **Secondary — pooled judgment.** Run every configuration, take the union of their top-10s, judge
+  each job once, score all configurations against that shared pool. Pooling cannot under-credit a
+  configuration for surfacing a good job nobody thought to pre-label.
+  *Why the change:* the original title-family relevance proxy returned precision@10 of 1.00 for both
+  BM25 and hybrid across all three profiles — a metric that scores nearly everything relevant cannot
+  separate the methods. That was a limitation of the proxy, not evidence the methods are equivalent.
+  The proxy is retained as a cross-check and the pools are still exported for manual labelling.
 - **AC-13.2** — **End-to-end evaluation** with filters enabled, reporting the top 5 for each of the
   three preset profiles from AC-3.7.
 - **AC-13.3** — **Latency**, measured per stage (filter, retrieve, score, evidence) as median and
@@ -872,8 +885,12 @@ compliance*.
   asserted tool choice.
 - **AC-13.5** — **Calibration evidence**: raw-cosine and calibrated-score histograms side by side,
   demonstrating the correction of the Stage 2 magic-multiplier failure mode.
-- **AC-13.6** — **Component sensitivity**: each score component is zeroed in turn and the change in the
-  top 5 is reported, identifying components that cannot discriminate. Includes the correlation between
+- **AC-13.6** — **Component sensitivity**: each score component is zeroed in turn and the change in
+  the top 5 is reported, identifying components that cannot discriminate. **Run across every
+  reference profile, not one (v1.1, 2026-09-09):** a single profile's result is not a property of
+  the weight. The data-science profile's top results are mostly remote, so location is constant
+  *for it* — a profile that rejects remote would see the same component discriminate. A conclusion
+  about a weight requires agreement across profiles. Includes the correlation between
   the two semantic components; if r > 0.8 they are double-counting one signal and REQ-9 is revised
   through the spec-change protocol.
 - **AC-13.8** — Every table and figure the report cites from this notebook is exported to
@@ -948,6 +965,10 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-09 | D13 (new), pipeline | Retrieval skipped when filter survivors ≤ 2,500; every eligible job scored exactly | AC-13.1 v1.1's recall metric showed retrieval at k=200 recovering only 45-95% of the true top-20 by score — the approximate stage was discarding what the exact stage wanted. Scoring all survivors costs ~220 ms more and gave an identical top-5 on all three profiles. Retrieval retained above the threshold as the scalability path |
+| 2026-09-09 | AC-13.1 (REQ-13 → v1.1) | Primary retrieval metric changed from precision@10 against a title-family proxy to **recall of the top-scoring set**; proxy and pooled judgment retained as secondary | The proxy returned precision@10 = 1.00 for both BM25 and hybrid on all three profiles — it could not separate the methods, which is a limitation of the metric rather than evidence about the methods. Recall-of-top-scored needs no human labels, is not circular (retrieval and scoring use different signals), and answers whether hybrid earns its cost |
+| 2026-09-09 | AC-13.6 (REQ-13 → v1.1) | Component sensitivity must run across every reference profile, not one | Q7's "16% of the weight is inert" rested on a single profile whose top results are mostly remote — making location constant *for that profile* rather than inert in general. A conclusion about a weight needs agreement across profiles |
+| 2026-09-09 | AC-9.10 | Evidence similarity computed against the job's stored index vector rather than a re-embedded copy of its text | Guarantees the evidence shown to the user and the evidence that produced the sub-score are the same measurement; also removes a redundant embedding pass (~178 ms of a 669 ms search) |
 | 2026-09-09 | AC-9.10, AC-9.12 | Résumé-evidence similarity now excludes the career-goals chunk | With it included the two semantic components returned identical values on most results — the goals chunk won the max — so 30% of the weight was one signal counted twice. This is the concrete answer to Q2, found by printing both sub-scores side by side on a real search |
 | 2026-09-09 | AC-5.5 (per-profile anchors) | Calibration anchors computed per profile at query time rather than pooled across reference profiles at build time | Pooled anchors failed on measurement: résumé length and vocabulary shift the similarity scale, so anchors that discriminated for the data-science profile mapped the security analyst's entire top-5 to 0.0. Per-profile anchors depend only on profile and corpus, so D8's pool-independence is preserved |
 | 2026-09-09 | AC-5.5, AC-5.7 (REQ-5 → v1.1), AC-9.11a (new) | Calibration background changed from 2,000 random corpus jobs to each reference profile's top-`RETRIEVE_K` retrieved candidates. Added AC-9.11a requiring calibrated sub-scores to discriminate within a real top-5 | Measured end to end: the random-corpus anchors were p5=0.153 / p95=0.500, but the top-200 retrieved candidates had p5=0.501 — so ~95% of everything scored clipped to 1.0 and the two semantic components (30% of the weight) contributed nothing to the ranking. Calibration was measured on the wrong population; the constants stay fixed at build time so D8's pool-independence is unaffected |

@@ -144,6 +144,27 @@ class PersonalKB:
         """
         return np.array([c.section != "career_goals" for c in self.chunks])
 
+    def retrieve_by_vector(self, job_vector: np.ndarray, k: int = 3,
+                           evidence_only: bool = False) -> list[tuple[Chunk, float]]:
+        """
+        Evidence for a job whose vector is already known (AC-9.10).
+
+        Preferred over :meth:`retrieve` in the pipeline: the job's index vector
+        already exists, so re-embedding its text is both wasted work and a second
+        measurement that could in principle disagree with the one that produced
+        the score. Passing the stored vector makes the displayed evidence and the
+        scored evidence provably the same computation.
+        """
+        if not self.chunks:
+            return []
+        mask = self.evidence_mask if evidence_only else np.ones(len(self.chunks), bool)
+        if not mask.any():
+            return []
+        idx = np.flatnonzero(mask)
+        scores = self.embeddings[idx] @ job_vector
+        order = np.argsort(-scores)[: min(k, len(idx))]
+        return [(self.chunks[idx[i]], float(scores[i])) for i in order]
+
     def retrieve(self, job_text: str, k: int = 3) -> list[tuple[Chunk, float]]:
         """
         AC-4.4: the ``min(k, n_chunks)`` most similar chunks, descending, each

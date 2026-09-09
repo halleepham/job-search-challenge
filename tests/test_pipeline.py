@@ -117,3 +117,32 @@ def test_retrieval_mode_is_selectable(index, profile, kb):
     """AC-7.3: REQ-13 compares modes through this same entry point."""
     for mode in ("bm25", "dense", "hybrid"):
         assert search(JOBS, index, profile, kb, mode=mode).results
+
+
+def test_d13_small_survivor_set_skips_retrieval(index, profile, kb):
+    """
+    D13: below the threshold every eligible job is scored exactly, so no
+    top-scoring job can be discarded by an approximate stage.
+    """
+    from src.pipeline import search
+
+    out = search(JOBS, index, profile, kb)
+    assert out.funnel["retrieval"].startswith("skipped")
+
+
+def test_d13_explicit_mode_still_uses_retrieval(index, profile, kb):
+    """AC-7.3: REQ-13 must still be able to exercise each retriever."""
+    from src.pipeline import search
+
+    out = search(JOBS, index, profile, kb, mode="bm25")
+    assert out.funnel["retrieval"].startswith("bm25")
+
+
+def test_d13_exact_path_cannot_lose_a_scored_job(index, profile, kb):
+    """Every job that passes the filters is scored when the set is small."""
+    from src.filters import apply_filters
+    from src.pipeline import search
+
+    kept, _ = apply_filters(JOBS, profile)
+    out = search(JOBS, index, profile, kb, top_n=99)
+    assert len(out.results) == len(kept)
