@@ -1,0 +1,2 @@
+LinkedIn IT, engineering, analytics, QA and science job functions (~25% strictly software/data)
+n_jobs=18990

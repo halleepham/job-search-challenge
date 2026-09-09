@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** PARTIALLY FROZEN — REQ-1 (v1.3), REQ-2, REQ-4, REQ-5 (v1.1), REQ-6, REQ-7 and REQ-9 are FROZEN. REQ-3, REQ-11, REQ-12, REQ-13, REQ-14 remain DRAFT. REQ-8 and REQ-10 are REMOVED.
+**Status:** FROZEN v1.0 — every active requirement is frozen. REQ-1 is at v1.3 and REQ-5 at v1.1; REQ-8 and REQ-10 are REMOVED.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -328,7 +328,7 @@ is buying almost nothing and REQ-9 should be revised through the spec-change pro
 
 ## REQ-3: Profile input page
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §1 (user inputs), §8 (final application)
 **Tests:** `tests/test_req3_profile.py` (validation logic only; widget rendering is not unit-tested)
 
@@ -780,7 +780,7 @@ document, as Stage 2 practice rather than as shipped code.
 
 ## REQ-11: Results page
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §8 (final application), §1 (expected outputs)
 **Tests:** manual; screenshots are the deliverable
 
@@ -813,7 +813,7 @@ A dedicated page rendering the ranked top 5 with full score transparency.
 
 ## REQ-12: Dataset analytics and visualization
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §7 (Big Data Analytics and Visualization — **required**), Minimum Visual Evidence #4
 **Tests:** `tests/test_req12_analytics.py` (aggregation correctness)
 
@@ -841,7 +841,7 @@ This is analysis *of the dataset*, distinct from the *result-level* charts in RE
 
 ## REQ-13: Evaluation notebook
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §9 (Results and Evaluation), §10 (comparison)
 **Location:** `notebooks/evaluation.ipynb`
 
@@ -883,7 +883,7 @@ compliance*.
 
 ## REQ-14: Reproducibility and documentation
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §11 (GitHub and Reproducibility), §10 (comparison table)
 
 **Acceptance Criteria:**

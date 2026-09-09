@@ -1,0 +1,10 @@
+title_family,n_jobs,n_with_salary,median_salary_max,median_salary_min
+Other,8463,2585.0,114400.0,85600.0
+Software Engineer,3714,980.0,155000.0,122793.0
+Other Engineering,3185,1006.0,135000.0,103500.0
+DevOps / Cloud / SRE,949,261.0,165000.0,124800.0
+Security,776,245.0,150000.0,115000.0
+Data Analyst / BI,605,219.0,125000.0,100000.0
+Data Scientist / ML,553,180.0,185060.0,129000.0
+Data Engineer,398,119.0,156000.0,123700.0
+QA / Test,347,114.0,118560.0,99500.0
