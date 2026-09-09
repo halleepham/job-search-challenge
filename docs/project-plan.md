@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** PARTIALLY FROZEN — REQ-1 is FROZEN v1.3, REQ-2 is FROZEN v1.0 (2026-09-08). All other sections DRAFT.
+**Status:** PARTIALLY FROZEN — REQ-1 (v1.3), REQ-2, REQ-4, REQ-5, REQ-6, REQ-7 and REQ-9 are FROZEN. REQ-3, REQ-11, REQ-12, REQ-13, REQ-14 remain DRAFT. REQ-8 and REQ-10 are REMOVED.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -411,7 +411,7 @@ system computed itself.
 
 ## REQ-4: Personal knowledge base (RAG index)
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §6 (analytics and matching), §4 (co-design enhancements — RAG)
 **Tests:** `tests/test_req4_personal_kb.py`
 
@@ -454,7 +454,7 @@ index is needed on this side.
 
 ## REQ-5: Job corpus indexing and calibration
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §5 (storage, indexing), §6 (embeddings, BM25)
 **Tests:** `tests/test_req5_indexing.py`
 
@@ -480,7 +480,8 @@ All three are computed once and cached; recomputing on app start would make the 
 - **AC-5.3** — A `manifest.json` records the dataset row count, a content hash of the source Parquet,
   and the embedding model name. On app start, indexes are loaded from disk if the manifest matches
   the current corpus and model, and rebuilt only if it does not.
-- **AC-5.4** — Loading cached indexes for a 30k-row corpus completes in under 10 seconds.
+- **AC-5.4** — Loading cached indexes for the corpus (18,990 rows as built) completes in under
+  10 seconds.
 - **AC-5.5** — Calibration constants (D8) are computed at index-build time: sample 2,000 jobs from the
   already-embedded corpus, compute cosine similarity against ≥3 reference profiles, and persist the
   5th and 95th percentiles of the resulting distribution to `calibration.json`.
@@ -495,7 +496,7 @@ All three are computed once and cached; recomputing on app start would make the 
 
 ## REQ-6: Hard filters
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §6 (matching method), §4 (co-design — corrected AI's missing filter layer)
 **Tests:** `tests/test_req6_filters.py`
 
@@ -508,8 +509,8 @@ Non-negotiable constraints applied as vectorized boolean masks over the full ser
 
 **Acceptance Criteria:**
 
-- **AC-6.1** — Filters run before retrieval, over the whole corpus, as pandas boolean masks. Filtering
-  30k rows completes in under 200 ms.
+- **AC-6.1** — Filters run before retrieval, over the whole corpus, as pandas boolean masks.
+  Filtering the 18,990-row corpus completes in under 200 ms.
 - **AC-6.2** — **Location.** Decision order: (a) if the user's accepted settings are Remote-only, a job
   passes only if `is_remote`; (b) a job with `is_remote` true passes regardless of distance; (c)
   otherwise, if both the user's city and the job's city geocode, pass when haversine distance ≤ the
@@ -545,7 +546,7 @@ They must not double-gate.
 
 ## REQ-7: Hybrid retrieval
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §6 (BM25, embeddings, hybrid retrieval), §9 (retrieval comparison)
 **Tests:** `tests/test_req7_retrieval.py`
 
@@ -566,7 +567,7 @@ a single candidate list.
 - **AC-7.3** — Each retriever is independently callable (`bm25_only`, `dense_only`, `hybrid`) so REQ-13
   can compare them without reconstructing the pipeline.
 - **AC-7.4** — When the survivor set is smaller than N, all survivors are returned and no error is raised.
-- **AC-7.5** — Retrieval over a 30k-row corpus returns in under 2 seconds on CPU.
+- **AC-7.5** — Retrieval over the 18,990-row corpus returns in under 2 seconds on CPU.
 
 ---
 
@@ -606,7 +607,7 @@ reason is stronger evidence of critical evaluation than shipping it would have b
 
 ## REQ-9: Weighted match score
 
-**Status:** DRAFT
+**Status:** FROZEN v1.0 (2026-09-09)
 **Traces to:** report §6 (combined score), §4 (corrections to AI scoring), §2 (Stage 1 lineage)
 **Tests:** `tests/test_req9_scoring.py`
 
