@@ -1,0 +1,9 @@
+component,weight,top5_overlap,order_changed
+required_skills,0.3,2,True
+resume_evidence_similarity,0.17,5,True
+experience,0.15,2,True
+career_goals_similarity,0.13,2,True
+location,0.08,5,False
+preferred_skills,0.08,5,False
+title,0.05,4,True
+education,0.04,3,True
