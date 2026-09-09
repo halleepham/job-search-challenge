@@ -183,7 +183,7 @@ def score_job(
     job: pd.Series,
     profile: UserProfile,
     goals_similarity: float,
-    evidence_similarity: float,
+    evidence_similarity: float | None,
 ) -> dict:
     """
     AC-9.1 / AC-9.14: the 0-100 score plus the breakdown that justifies it.

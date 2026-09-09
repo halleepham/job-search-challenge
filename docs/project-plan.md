@@ -4,7 +4,7 @@
 **Author:** Hallee Pham
 **Branch:** `human-ai-codesign`
 
-**Status:** PARTIALLY FROZEN — REQ-1 (v1.3), REQ-2, REQ-4, REQ-5, REQ-6, REQ-7 and REQ-9 are FROZEN. REQ-3, REQ-11, REQ-12, REQ-13, REQ-14 remain DRAFT. REQ-8 and REQ-10 are REMOVED.
+**Status:** PARTIALLY FROZEN — REQ-1 (v1.3), REQ-2, REQ-4, REQ-5 (v1.1), REQ-6, REQ-7 and REQ-9 are FROZEN. REQ-3, REQ-11, REQ-12, REQ-13, REQ-14 remain DRAFT. REQ-8 and REQ-10 are REMOVED.
 <!-- Individual REQ sections are frozen one at a time. Update this line to FROZEN v1.0 only when every REQ below reads FROZEN. -->
 
 **Last updated:** 2026-09-08
@@ -454,7 +454,7 @@ index is needed on this side.
 
 ## REQ-5: Job corpus indexing and calibration
 
-**Status:** FROZEN v1.0 (2026-09-09)
+**Status:** FROZEN v1.1 (2026-09-09)
 **Traces to:** report §5 (storage, indexing), §6 (embeddings, BM25)
 **Tests:** `tests/test_req5_indexing.py`
 
@@ -482,13 +482,29 @@ All three are computed once and cached; recomputing on app start would make the 
   the current corpus and model, and rebuilt only if it does not.
 - **AC-5.4** — Loading cached indexes for the corpus (18,990 rows as built) completes in under
   10 seconds.
-- **AC-5.5** — Calibration constants (D8) are computed at index-build time: sample 2,000 jobs from the
-  already-embedded corpus, compute cosine similarity against ≥3 reference profiles, and persist the
-  5th and 95th percentiles of the resulting distribution to `calibration.json`.
+- **AC-5.5** — Calibration constants (D8) are computed at index-build time, against the population
+  the score is actually applied to. For each of the ≥3 reference profiles, take its **top-`RETRIEVE_K`
+  most similar jobs** — the candidates that survive to scoring — pool those similarities across
+  profiles, and persist the 5th and 95th percentiles to `calibration.json`.
+  **Anchors are per-profile, computed at query time** from that profile's own top-`RETRIEVE_K` over
+  the whole corpus (~5 ms — one matrix multiply against precomputed vectors). Pooling anchors across
+  reference profiles was tried and failed: résumés differ in length and vocabulary, so their
+  similarity scales differ, and pooled anchors that discriminated for one profile mapped another's
+  entire top-5 to 0.0. Pool-independence (D8) still holds — the anchors depend only on the profile
+  and the corpus, never on which candidates survived filtering, so adding a job to a search cannot
+  change any score. What is given up is cross-*profile* comparability, which was never a use case:
+  nobody compares their 77 to another user's 77.
+  Amended v1.1 (2026-09-09): the original sampled 2,000 *random* jobs. Measured, that put the p95
+  anchor at 0.500 while the top-200 retrieved candidates had a p5 of **0.501** — so ~95% of everything
+  scored clipped to 1.0 and the two semantic components (30% of the weight) became a constant across
+  the ranking. That is precisely the narrow-band failure AC-9.11 exists to prevent, relocated rather
+  than fixed. Anchoring on retrieved candidates keeps the constants **fixed at build time**, so D8's
+  pool-independence is unaffected: adding a job to a live search cannot change them.
 - **AC-5.6** — At least one reference profile is materially unlike the author's own, so the background
   distribution is not calibrated to a single person.
-- **AC-5.7** — Calibration uses only precomputed vectors — no additional embedding pass. Its build-time
-  cost is under 1 second and its query-time cost is one subtraction and one division per job.
+- **AC-5.7** — Calibration uses only precomputed vectors — no additional embedding pass beyond the
+  reference profiles themselves. Its build-time cost is a few matrix multiplications against the
+  corpus (well under a second) and its query-time cost is one subtraction and one division per job.
 - **AC-5.8** — `calibration.json` is invalidated by the same manifest check as the indexes: changing
   the corpus or the embedding model forces recomputation.
 
@@ -701,13 +717,22 @@ semantic split is carried over from the Stage 2 co-design prep unchanged, so the
 - **AC-9.9** — **Career goals ~ description** = calibrated cosine between the career-goals embedding
   and the job embedding.
 - **AC-9.10** — **Résumé evidence ~ description** = calibrated maximum cosine over the retrieved
-  personal chunks for that job. The chunks producing this score are the same ones surfaced to the
+  personal chunks for that job, **excluding the career-goals chunk**, which has its own component
+  (AC-9.9). Without that exclusion the two semantic components returned identical values on most
+  results — the goals chunk simply won the max — so 30% of the weight was one signal counted twice,
+  exactly what AC-9.12 forbids. A profile with no résumé content beyond its goals statement yields
+  no evidence and the component is dropped and renormalized, as with preferred skills (AC-9.4). The chunks producing this score are the same ones surfaced to the
   user as evidence in AC-11.5, so the score and the justification shown to the user cannot disagree.
+- **AC-9.11a** — Calibrated semantic sub-scores must **discriminate within the scored candidate
+  set**, not merely be bounded: across a real top-5, the values may not all be identical. A
+  calibration that maps every candidate to 1.0 has the same practical effect as the raw narrow band
+  it replaced. Asserted by test against the real corpus.
 - **AC-9.11** — Calibration (D8) maps raw cosine through
   `clip((raw - p5) / (p95 - p5), 0, 1)` using the persisted constants from AC-5.5. Scores do **not**
   depend on the composition of the candidate set: adding an unrelated job to the pool changes no other
   job's score. This is asserted directly by a test.
-- **AC-9.12** — No input signal feeds two components. The text embedded for the semantic components
+- **AC-9.12** — No input signal feeds two components. Tested directly: on a real top-5 the
+  career-goals and résumé-evidence sub-scores must not be identical across results. The text embedded for the semantic components
   excludes the skills list, which already has its own components.
 - **AC-9.13** — Every component has a defined behavior for missing input — drop-and-renormalize, or an
   explicit neutral 0.5. No component silently defaults to 1.0.
@@ -922,6 +947,9 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-09 | AC-9.10, AC-9.12 | Résumé-evidence similarity now excludes the career-goals chunk | With it included the two semantic components returned identical values on most results — the goals chunk won the max — so 30% of the weight was one signal counted twice. This is the concrete answer to Q2, found by printing both sub-scores side by side on a real search |
+| 2026-09-09 | AC-5.5 (per-profile anchors) | Calibration anchors computed per profile at query time rather than pooled across reference profiles at build time | Pooled anchors failed on measurement: résumé length and vocabulary shift the similarity scale, so anchors that discriminated for the data-science profile mapped the security analyst's entire top-5 to 0.0. Per-profile anchors depend only on profile and corpus, so D8's pool-independence is preserved |
+| 2026-09-09 | AC-5.5, AC-5.7 (REQ-5 → v1.1), AC-9.11a (new) | Calibration background changed from 2,000 random corpus jobs to each reference profile's top-`RETRIEVE_K` retrieved candidates. Added AC-9.11a requiring calibrated sub-scores to discriminate within a real top-5 | Measured end to end: the random-corpus anchors were p5=0.153 / p95=0.500, but the top-200 retrieved candidates had p5=0.501 — so ~95% of everything scored clipped to 1.0 and the two semantic components (30% of the weight) contributed nothing to the ranking. Calibration was measured on the wrong population; the constants stay fixed at build time so D8's pool-independence is unaffected |
 | 2026-09-09 | AC-9.3 | Required-skill overlap damped by `min(1, \|required\| / 3)` | Measured on the built corpus: 27.1% of postings yield exactly one required skill, 43.1% two or fewer. Undamped, a one-skill posting scores 1.0 on the 30% component and outranks a ten-skill posting matched 8/10. A ratio from one observation should not weigh the same as one from ten. Rejected raising AC-2.6's floor to >=3, which would delete a further 56.3% of the corpus |
 | 2026-09-08 | REQ-8 (removed), D10, AC-13.1, AC-13.3, Non-Goals | Cross-encoder removed entirely rather than kept as a stretch pruner | Not asked for by the assignment (§6 and §9 name BM25, embeddings and hybrid only); made redundant by filter-first (D2), since scoring 200 candidates costs milliseconds and unmeritorious jobs score low anyway; and opaque in either role — as a score component it adds an unjustifiable term to the breakdown, as a pruner it can silently drop a good job. Accepted from the AI at Stage 2 and reversed here on measured reasoning |
 | 2026-09-08 | AC-1.6 (REQ-1 → FROZEN v1.3) | Experience regex now captures ranges and takes the lower bound | The frozen regex took the upper bound: "4-7 years related business experience" parsed as 7. The field is a *minimum*, so every ranged requirement was overstated, and AC-9.5 turns an inflated `job_min_years` into a wider `gap` — penalising candidates who actually qualify. Caught by sampling parsed output against source text |

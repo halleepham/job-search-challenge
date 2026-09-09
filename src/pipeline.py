@@ -70,20 +70,35 @@ def search(
     positions = np.array([p for p, _ in hits], dtype=int)
     job_vecs = index.embeddings[positions]
 
-    goals_vec = embed([profile.career_goals])[0] if profile.career_goals else None
-    goals_raw = job_vecs @ goals_vec if goals_vec is not None else np.zeros(len(positions))
+    # AC-5.5 v1.1: each semantic component is calibrated against its OWN
+    # similarity distribution over the whole corpus, for THIS profile. Sharing
+    # one set of anchors between two different query texts collapses one of them.
+    goals_cal = evidence_cal = None
+    goals_raw = np.zeros(len(positions))
+    evidence_raw = None
 
+    if profile.career_goals:
+        goals_vec = embed([profile.career_goals])[0]
+        goals_cal = index.calibration_for_scores(index.embeddings @ goals_vec)
+        goals_raw = job_vecs @ goals_vec
+
+    # AC-9.10: evidence excludes the career-goals chunk, which AC-9.9 already scores.
     if kb is not None and len(kb.chunks):
-        evidence_raw = (job_vecs @ kb.embeddings.T).max(axis=1)
-    else:
-        evidence_raw = np.zeros(len(positions))
+        mask = kb.evidence_mask
+        if mask.any():
+            chunk_vecs = kb.embeddings[mask]
+            evidence_cal = index.calibration_for_scores(
+                (index.embeddings @ chunk_vecs.T).max(axis=1))
+            evidence_raw = (job_vecs @ chunk_vecs.T).max(axis=1)
 
     scored = []
     for offset, position in enumerate(positions):
         scored.append(score_job(
             jobs.iloc[position], profile,
-            goals_similarity=index.calibration.apply(float(goals_raw[offset])),
-            evidence_similarity=index.calibration.apply(float(evidence_raw[offset])),
+            goals_similarity=(goals_cal.apply(float(goals_raw[offset]))
+                              if goals_cal else None),
+            evidence_similarity=(evidence_cal.apply(float(evidence_raw[offset]))
+                                 if evidence_cal is not None else None),
         ))
     timings["score"] = (time.perf_counter() - t) * 1000
 

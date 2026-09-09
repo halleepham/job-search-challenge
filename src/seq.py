@@ -18,11 +18,8 @@ def as_list(value) -> list:
     """[] for None/NaN, otherwise the value's items. Never raises on an array."""
     if value is None:
         return []
-    try:
-        if value != value:          # NaN
-            return []
-    except (TypeError, ValueError):
-        pass                        # arrays: elementwise compare, not a scalar
+    if isinstance(value, float) and value != value:      # NaN, checked as a scalar
+        return []
     try:
         return list(value)
     except TypeError:

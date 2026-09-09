@@ -120,6 +120,23 @@ def test_ac_5_7_calibration_uses_precomputed_vectors(index):
     assert c.p5 < c.p95
 
 
+def test_ac_5_5_v1_1_anchors_on_retrieved_candidates():
+    """
+    AC-5.5 v1.1: the background is each profile's top-K, not random jobs.
+    A random-job background sits below the retrieved distribution, which is what
+    made every scored candidate clip to 1.0.
+    """
+    rng = np.random.default_rng(1)
+    jobs = rng.normal(size=(500, 384))
+    jobs /= np.linalg.norm(jobs, axis=1, keepdims=True)
+    profiles = jobs[:3] + rng.normal(scale=0.05, size=(3, 384))
+    profiles /= np.linalg.norm(profiles, axis=1, keepdims=True)
+
+    top_k = calibrate(jobs, profiles, top_k=50)
+    everything = calibrate(jobs, profiles, top_k=500)
+    assert top_k.p5 > everything.p5, "top-K background must sit above a whole-corpus one"
+
+
 @pytest.mark.parametrize("raw,expected", [(-1.0, 0.0), (2.0, 1.0)])
 def test_ac_9_11_calibration_clips(raw, expected):
     """AC-9.11: mapped output is bounded to [0, 1]."""

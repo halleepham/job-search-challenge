@@ -132,6 +132,18 @@ class PersonalKB:
         chunks = chunk_documents(resume_text, career_goals, extra_documents)
         return cls(chunks, embed([c.text for c in chunks]))
 
+    @property
+    def evidence_mask(self) -> np.ndarray:
+        """
+        AC-9.10: chunks eligible as *evidence* - everything except the
+        career-goals statement, which has its own score component (AC-9.9).
+
+        Included, it won the max on most results and the two semantic components
+        returned identical values, making 30% of the weight one signal counted
+        twice (AC-9.12).
+        """
+        return np.array([c.section != "career_goals" for c in self.chunks])
+
     def retrieve(self, job_text: str, k: int = 3) -> list[tuple[Chunk, float]]:
         """
         AC-4.4: the ``min(k, n_chunks)`` most similar chunks, descending, each

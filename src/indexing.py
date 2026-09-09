@@ -31,8 +31,10 @@ from src.seq import as_list
 
 INDEX_DIR = Path("data/index")
 
-#: AC-5.5: background sample size for calibration.
-CALIBRATION_SAMPLE = 2000
+#: AC-5.5 (v1.1): how many top candidates per reference profile define the
+#: calibration background. Matches the pipeline's retrieval depth, so the
+#: background is the population the score is actually applied to.
+CALIBRATION_TOP_K = 200
 
 
 def build_dense_text(row) -> str:
@@ -79,20 +81,28 @@ class CalibrationConstants:
 
 
 def calibrate(job_embeddings: np.ndarray, profile_embeddings: np.ndarray,
-              sample: int = CALIBRATION_SAMPLE, seed: int = 0) -> CalibrationConstants:
+              top_k: int = CALIBRATION_TOP_K) -> CalibrationConstants:
     """
-    AC-5.5 / AC-5.7: percentiles of the similarity distribution between reference
-    profiles and a random sample of the corpus.
+    AC-5.5 (v1.1) / AC-5.7: percentiles of the similarity distribution over the
+    candidates that actually reach scoring.
 
-    Reads **already-computed** vectors - no extra embedding pass, so the cost is
-    a few thousand dot products, well under a second.
+    For each reference profile, take its ``top_k`` most similar jobs and pool
+    them. Calibrating on *random* corpus jobs instead put the p95 anchor below
+    the p5 of the retrieved set, so ~95% of everything scored clipped to 1.0 and
+    the semantic components stopped discriminating (AC-9.11a).
+
+    The constants are still computed **once at build time** from a fixed
+    reference set, so a job's calibrated score never depends on which other jobs
+    a live search retrieved - D8's pool-independence is untouched.
+
+    Reads already-computed vectors: a few matrix multiplies, well under a second.
     """
-    n = min(sample, len(job_embeddings))
-    idx = np.random.default_rng(seed).choice(len(job_embeddings), size=n, replace=False)
-    sims = (profile_embeddings @ job_embeddings[idx].T).ravel()
+    sims = profile_embeddings @ job_embeddings.T          # (profiles, jobs)
+    k = min(top_k, sims.shape[1])
+    top = np.sort(sims, axis=1)[:, -k:].ravel()
     return CalibrationConstants(
-        p5=float(np.percentile(sims, 5)), p95=float(np.percentile(sims, 95)),
-        n_sampled=n, n_profiles=len(profile_embeddings),
+        p5=float(np.percentile(top, 5)), p95=float(np.percentile(top, 95)),
+        n_sampled=int(top.size), n_profiles=len(profile_embeddings),
     )
 
 
@@ -164,6 +174,33 @@ class JobIndex:
         return cls.build(jobs, index_dir)
 
     # ------------------------------------------------------------- search
+
+    def calibration_for_scores(self, corpus_scores: np.ndarray,
+                               top_k: int = CALIBRATION_TOP_K) -> CalibrationConstants:
+        """
+        AC-5.5 (v1.1): anchors for one semantic component, from the top-K of that
+        component's *own* similarity distribution over the whole corpus.
+
+        Calibrated **per component**, not once per profile: the career-goals
+        query and the resume-chunk query are different texts with different
+        similarity scales, so anchors measured on one and applied to the other
+        pushed a whole top-5 to 0.0. Calibrated **per profile**, not pooled
+        across reference profiles, because resume length and vocabulary shift the
+        scale the same way.
+
+        D8's pool-independence is intact either way: the anchors depend only on
+        the profile and the corpus, never on which candidates survived filtering,
+        so adding a job to a live search cannot change a score. Cost is one
+        matrix multiply against precomputed vectors.
+        """
+        if corpus_scores.size == 0:
+            return self.calibration
+        k = min(top_k, corpus_scores.size)
+        top = np.sort(corpus_scores)[-k:]
+        return CalibrationConstants(
+            p5=float(np.percentile(top, 5)), p95=float(np.percentile(top, 95)),
+            n_sampled=int(k), n_profiles=1,
+        )
 
     def search_dense(self, query: str, k: int = 200) -> list[tuple[int, float]]:
         """Cosine similarity over unit-normalized vectors, as positional indexes."""
