@@ -20,6 +20,7 @@ from functools import lru_cache
 import pandas as pd
 
 from src.profiles import UserProfile
+from src.seq import as_list, as_set
 
 #: AC-6.3: qualifiers stripped before comparison, so "Kansas City Metropolitan
 #: Area" and "Kansas City, MO" reach the same normalized form.
@@ -161,23 +162,9 @@ def employment_type_passes(job: pd.Series, profile: UserProfile) -> bool:
     return value == "Unknown" or value in profile.accepted_employment_types
 
 
-def _as_set(value) -> set[str]:
-    """
-    Tolerate the three shapes a skills column takes: a Python list (fixtures),
-    a numpy array (Parquet round-trip), or None/NaN. `value or []` is not safe
-    here - on a numpy array it raises ValueError rather than defaulting.
-    """
-    if value is None:
-        return set()
-    try:
-        return set(value)
-    except TypeError:
-        return set()
-
-
 def skill_floor_passes(job: pd.Series, profile: UserProfile) -> bool:
     """AC-6.8: at least one shared required skill."""
-    return bool(_as_set(job.get("required_skills")) & profile.skills)
+    return bool(as_set(job.get("required_skills")) & profile.skills)
 
 
 # --- vectorized masks (AC-6.1) ----------------------------------------------
@@ -226,12 +213,12 @@ def _salary_mask(jobs: pd.DataFrame, profile: UserProfile) -> pd.Series:
 
 def _skill_floor_mask(jobs: pd.DataFrame, profile: UserProfile) -> pd.Series:
     """
-    Note `_as_set`: Parquet round-trips list columns as numpy arrays, where
+    Note `as_set`: Parquet round-trips list columns as numpy arrays, where
     `v or []` raises rather than returning a default.
     """
     skills = profile.skills
     return pd.Series(
-        [bool(_as_set(v) & skills) for v in jobs["required_skills"]], index=jobs.index
+        [bool(as_set(v) & skills) for v in jobs["required_skills"]], index=jobs.index
     )
 
 

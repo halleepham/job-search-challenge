@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from src.personal_kb import EMBEDDING_MODEL, embed
+from src.seq import as_list
 
 INDEX_DIR = Path("data/index")
 
@@ -46,7 +47,7 @@ def build_dense_text(row) -> str:
 
 def build_bm25_text(row) -> str:
     """AC-5.2: ``title + skills + description``, untruncated."""
-    skills = list(row.get("required_skills") or []) + list(row.get("preferred_skills") or [])
+    skills = as_list(row.get("required_skills")) + as_list(row.get("preferred_skills"))
     return f"{row['title']} {' '.join(skills)} {row['description'] or ''}".lower()
 
 
