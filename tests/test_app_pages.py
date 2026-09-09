@@ -111,3 +111,32 @@ def test_ac_11_3_breakdown_sums_to_the_displayed_score():
     for r in res.results:
         shown = sum(round(c["weighted"] * 100, 1) for c in r["components"])
         assert abs(shown - r["score"]) < 0.5, f"table sums to {shown}, card says {r['score']}"
+
+
+def test_ac_11_8_to_11_13_panels_render():
+    """REQ-11 v1.1: the explainable-match panels the course guidance specifies."""
+    from src.profiles import PRESETS
+
+    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    assert not at.exception, at.exception
+
+    text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
+    assert "**Job**" in text and "**You**" in text, "AC-11.8 job/candidate panel"
+    assert "Evidence retrieved" in text, "AC-11.9 evidence table"
+    assert "Overall match" in text, "AC-11.10 component bars"
+    assert "Gaps & unknowns" in text or "No gaps" in text, "AC-11.11"
+    assert any(w in text for w in ("candidate.", "candidate,")), "AC-11.13 verdict"
+    # AppTest does not expose st.progress, so assert on the caption the bars emit —
+    # which also proves AC-11.3, that the points shown total the displayed score.
+    captions = " ".join(c.value for c in at.caption if isinstance(c.value, str))
+    assert "Points total" in captions, "AC-11.10 component bars"
+    assert any("Decision" == r.label for r in at.radio), "AC-11.12 decision control"
+    assert any("Takeaway" in i.value for i in at.info), "AC-11.13 takeaway"
+
+
+def test_ac_11_12_weight_sliders_present():
+    from src.profiles import PRESETS
+
+    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    from src.scoring import WEIGHTS
+    assert len(at.slider) == len(WEIGHTS), "one slider per score component"

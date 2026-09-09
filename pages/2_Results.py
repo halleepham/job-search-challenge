@@ -37,9 +37,35 @@ def run(_profile, mode: str):
     return search(jobs, index, _profile, kb, mode=mode)
 
 
-mode = st.radio("Retrieval method", ["hybrid", "bm25", "dense"], horizontal=True,
-                help="Hybrid fuses both. The other two are here because the evaluation "
-                     "notebook compares them through this same entry point.")
+from src.explain import component_bars, evidence_table, gaps_and_unknowns, verdict
+from src.scoring import WEIGHTS
+
+top_l, top_r = st.columns([2, 3])
+mode = top_l.radio("Retrieval method", ["hybrid", "bm25", "dense"], horizontal=True,
+                   help="Hybrid fuses both. Below 2,500 survivors retrieval is skipped "
+                        "entirely and every eligible job is scored exactly (D13).")
+
+# AC-11.12: explicit weight adjustment. Not the learned feedback loop cut in
+# Non-Goals - the user sets these directly and sees the consequence.
+with top_r.expander("Adjust what matters to you"):
+    st.caption("Re-scores the same candidates. Values are relative; they are renormalised.")
+    overrides, cols = {}, st.columns(4)
+    for i, (name, default) in enumerate(WEIGHTS.items()):
+        overrides[name] = cols[i % 4].slider(
+            name.replace("_", " ").replace(" similarity", ""),
+            0.0, 0.40, float(default), 0.01, key=f"w_{name}")
+    if st.button("Re-score with these weights"):
+        st.session_state["weight_overrides"] = overrides
+        st.cache_data.clear()
+    if st.session_state.get("weight_overrides"):
+        if st.button("Reset to the designed weights"):
+            del st.session_state["weight_overrides"]
+            st.cache_data.clear()
+
+if st.session_state.get("weight_overrides"):
+    WEIGHTS.update(st.session_state["weight_overrides"])
+    st.info("Scoring with **your** weights, not the designed ones.")
+
 result = run(profile, mode)
 
 # --- AC-11.2: the funnel, so the pipeline is legible -------------------------
@@ -83,29 +109,62 @@ for rank, r in enumerate(result.results, start=1):
         )
         score_col.metric(f"{TIER_COLOR[r['tier']]} {r['tier']}", r["score"])
 
-        c1, c2 = st.columns(2)
-        c1.success(f"**Matched ({len(r['matched_skills'])})** · " +
-                   (", ".join(r["matched_skills"]) or "—"))
-        c2.warning(f"**Missing ({len(r['missing_skills'])})** · " +
-                   (", ".join(r["missing_skills"][:10]) or "—"))
+        gaps = gaps_and_unknowns(r, profile)
+        headline, advice = verdict(r, gaps)                       # AC-11.13
 
-        with st.expander("Why this score?"):
-            # AC-11.3: contributions must sum to the displayed score.
-            rows = [{"Component": LABELS[c["name"]],
-                     "Sub-score": "—" if c["sub_score"] is None else round(c["sub_score"], 2),
-                     "Weight": f"{c['weight']:.0%}",
-                     "Points": round(c["weighted"] * 100, 1)} for c in r["components"]]
-            table = pd.DataFrame(rows)
-            st.dataframe(table, hide_index=True, use_container_width=True)
-            st.caption(f"Contributions total **{table['Points'].sum():.0f}** = the score above. "
-                       "A component showing “—” was dropped for this job and its weight "
-                       "redistributed across the rest.")
+        # AC-11.8: job and candidate side by side — the comparison the score is about.
+        jc1, jc2 = st.columns(2)
+        with jc1:
+            st.markdown("**Job**")
+            st.markdown(f"- {job['company']}\n- {job['location_raw']} ({job['work_setting']})\n"
+                        f"- {job['employment_type']}\n- {salary}\n"
+                        f"- Requires: {', '.join(list(job['required_skills'])[:6]) or '—'}")
+        with jc2:
+            st.markdown("**You**")
+            edu = {1: "High school", 2: "Associate", 3: "Bachelor's", 4: "Master's", 5: "PhD"}
+            pursuing = (f" (pursuing {edu.get(profile.education_in_progress, '')})"
+                        if profile.education_in_progress else "")
+            st.markdown(
+                f"- {edu.get(profile.highest_completed_education, '—')}{pursuing}\n"
+                f"- {profile.years_experience:g} years experience\n"
+                f"- {profile.preferred_location or 'Any location'}\n"
+                f"- Accepts: {', '.join(sorted(profile.accepted_work_settings))}\n"
+                f"- Skills: {', '.join(sorted(profile.skills)[:6])}")
 
-            if r["evidence"]:
-                st.markdown("**Supporting text from your résumé** — quoted verbatim:")
-                for ev in r["evidence"]:
-                    st.markdown(f"> {ev['text'].strip()}")
-                    st.caption(f"from your *{ev['section']}* section · similarity {ev['similarity']}")
+        st.markdown(f"**{headline}.** {advice}")
+
+        # AC-11.10: bars showing earned points out of maximum.
+        st.markdown("**Overall match**")
+        bars = component_bars(r)
+        for _, row in bars.iterrows():
+            bar_col, num_col = st.columns([5, 1])
+            bar_col.progress(min(1.0, row["Fraction"]), text=row["Component"])
+            num_col.markdown(
+                "—" if row["Dropped"] else f"**{row['Earned']:.1f}** / {row['Max']:.1f}")
+        st.caption(f"Points total **{bars['Earned'].sum():.0f}** — the score above. "
+                   "“—” means the component was dropped for this job (the posting gave it "
+                   "nothing to measure) and its weight was redistributed across the rest.")
+
+        ev_col, gap_col = st.columns(2)
+        with ev_col:                                              # AC-11.9
+            st.markdown("**Evidence retrieved**")
+            st.dataframe(evidence_table(r, profile), hide_index=True,
+                         use_container_width=True)
+            st.caption("Résumé rows are exact spans of your document — never paraphrased "
+                       "or generated.")
+        with gap_col:                                             # AC-11.11
+            st.markdown("**Gaps & unknowns**")
+            if len(gaps):
+                st.dataframe(gaps, hide_index=True, use_container_width=True)
+                st.caption("*Gap* = something you lack. *Unknown* = something the posting "
+                           "never stated, where the score used a neutral default.")
+            else:
+                st.success("No gaps, and the posting stated everything the score needs.")
+
+        # AC-11.12: per-result action.
+        act_col, _ = st.columns([2, 3])
+        act_col.radio("Decision", ["Undecided", "Apply", "Save for later", "Dismiss"],
+                      key=f"decision_{r['job_id']}", horizontal=False)
 
 # --- AC-11.6: score distribution --------------------------------------------
 st.divider()
@@ -119,3 +178,18 @@ st.plotly_chart(
            color_discrete_map={"Strong": "#2e7d32", "Good": "#1565c0",
                                "Moderate": "#ef6c00", "Low": "#757575"}),
     use_container_width=True)
+
+decisions = {k.removeprefix("decision_"): v for k, v in st.session_state.items()
+             if k.startswith("decision_") and v != "Undecided"}
+if decisions:
+    st.markdown("**Your decisions:** " +
+                " · ".join(f"{v} ({k})" for k, v in decisions.items()))
+
+st.divider()
+st.info(
+    "**Takeaway.** An explainable match shows the score, the evidence behind it, and the "
+    "gaps and unknowns around it — so the decision stays yours. Every number above is "
+    "produced by a stated rule, every résumé quote is an exact span of your own document, "
+    "and every component the posting could not support is shown as dropped rather than "
+    "quietly guessed."
+)
