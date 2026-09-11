@@ -142,3 +142,96 @@ def test_results_are_domain_appropriate(searches):
     """A sanity check no unit fixture can give: does the ranking make sense?"""
     titles = " ".join(r["job"]["title"].lower() for r in searches["security_analyst"].results)
     assert any(w in titles for w in ("security", "cyber", "threat", "soc", "information"))
+
+
+def test_ac_5_4_cached_index_loads_within_budget(env):
+    """AC-5.4: under 10s — the justification for caching rather than re-embedding."""
+    import time
+
+    from src.indexing import JobIndex
+
+    jobs, _ = env
+    start = time.perf_counter()
+    reloaded = JobIndex.load_or_build(jobs)
+    elapsed = time.perf_counter() - start
+    assert reloaded.from_cache, "index must load from disk, not rebuild"
+    assert elapsed < 10, f"cached load took {elapsed:.1f}s"
+
+
+def test_ac_6_4_geocoding_resolution_is_measured(env):
+    """
+    AC-6.4: the location filter is the most consequential one, so its coverage is
+    measured rather than assumed. Roughly 69% of rows resolve; the rest fall to
+    AC-6.2's string-equality branch by design.
+    """
+    from src.filters import geocode, parse_location
+
+    jobs, _ = env
+    locations = jobs["location_raw"].dropna().unique()
+    resolved = {loc: bool(geocode(*parse_location(loc))) for loc in locations}
+    rate = jobs["location_raw"].map(resolved).fillna(False).mean()
+    assert 0.5 < rate < 1.0, f"geocoding resolves {rate:.0%} of rows"
+
+
+def test_ac_7_5_retrieval_is_interactive(env):
+    """AC-7.5: under 2s on CPU."""
+    import time
+
+    from src.filters import apply_filters
+    from src.profiles import PRESETS
+    from src.retrieval import retrieve
+
+    jobs, index = env
+    p = PRESETS["data_science_student"]
+    kept, _ = apply_filters(jobs, p)
+    position_of = {j: i for i, j in enumerate(jobs["job_id"])}
+    candidates = [position_of[j] for j in kept["job_id"]]
+
+    start = time.perf_counter()
+    retrieve(index, p, candidate_positions=candidates, mode="hybrid", k=400)
+    elapsed = time.perf_counter() - start
+    assert elapsed < 2.0, f"retrieval took {elapsed:.2f}s"
+
+
+def test_ac_1_11_every_job_links_to_its_source(env):
+    """AC-1.11: 'Applied' needs somewhere to go, and expiry must be disclosable."""
+    jobs, _ = env
+    assert jobs["posting_url"].notna().all()
+    assert jobs["posting_url"].str.startswith("http").all()
+    assert jobs["expiry_date"].notna().all()
+
+
+def test_ac_2_7_coverage_stats_are_published(env):
+    """AC-2.7: extraction is measured, not assumed — and the report cites these."""
+    import json
+    from pathlib import Path
+
+    stats = json.loads(Path("data/processed/coverage_stats.json").read_text())
+    skills = stats["skills"]
+    for field in ["pct_with_required_section", "pct_with_preferred_section",
+                  "pct_with_preferred_skills", "median_required_skills",
+                  "pct_with_one_required_skill"]:
+        assert field in skills
+    assert stats["funnel"]["after_zero_skill_drop"] == len(env[0])
+
+
+def test_ac_11_7_no_profile_field_is_collected_and_ignored():
+    """
+    AC-11.7: every field the form collects must reach a filter or a score
+    component. Storing education and salary and then reading neither is the exact
+    defect in the Stage 2 AI code (`agent-exercise:src/models.py:17-18`).
+    """
+    import inspect
+
+    from src import filters, pipeline, scoring
+    from src.profiles import UserProfile
+
+    # Whole modules, not three entry points: `preferred_location` is consumed by
+    # `_location_mask` and `_distance_for`, so inspecting only the callers would
+    # report a field as unused that the pipeline plainly reads.
+    consumed = " ".join(inspect.getsource(m) for m in (filters, scoring, pipeline))
+    # Reaches scoring through the knowledge base rather than by attribute name.
+    indirect = {"name", "resume_text"}
+    for field in UserProfile.__dataclass_fields__:
+        if field not in indirect:
+            assert field in consumed, f"UserProfile.{field} is collected but never read"
