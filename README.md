@@ -192,6 +192,24 @@ title 0.67 · résumé evidence 0.67 · location 0.33 · preferred skills 0.00.
 
 ## Repository
 
+### Branches — the three design stages
+
+| Branch | Stage |
+|---|---|
+| `human-baseline` | Stage 1 — the original paper design, before any AI involvement |
+| `agent-exercise` | Stage 2 — code an AI agent produced from the problem statement alone, never merged |
+| `main` / `human-ai-codesign` | Stage 3 — this system |
+
+The Stage 2 branch is kept unmerged **on purpose**: it is the comparison baseline. Any claim in the
+report about what the AI got wrong can be checked directly —
+
+```bash
+git show agent-exercise:src/matcher.py       # the AI's matching engine
+git diff main agent-exercise -- src/         # what changed between stages
+```
+
+### Layout
+
 ```
 app.py                  router and top navigation
 views/                  profile · results · my jobs · insights
