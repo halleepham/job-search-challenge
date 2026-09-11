@@ -309,3 +309,50 @@ def test_ac_11_14_posting_link_and_expiry_disclosed():
                            columns=["posting_url", "expiry_date"])
     assert jobs["posting_url"].notna().all(), "every result must have a source link"
     assert jobs["expiry_date"].notna().all(), "every result must disclose when it closed"
+
+
+def test_ac_3_11_v1_1_form_restores_after_navigation():
+    """
+    Streamlit drops widget state for controls not rendered on the current run, so
+    keyed widgets alone did not survive a trip to Matches and back — the form came
+    back empty. It is restored from the submitted profile instead.
+    """
+    from src.profiles import PRESETS
+
+    at = _run("views/profile.py", profile=PRESETS["data_science_student"])
+    assert not at.exception, at.exception
+    assert at.text_area(key="pf_goals").value == PRESETS["data_science_student"].career_goals
+    assert at.session_state["pf_salary"] == PRESETS["data_science_student"].min_salary
+
+
+def test_ac_3_12_loaded_profile_offers_update_not_only_save_as_new():
+    from src.profiles import PRESETS
+
+    at = _run("views/profile.py",
+              saved_profiles={"Data roles KC": PRESETS["data_science_student"]},
+              loaded_name="Data roles KC")
+    assert not at.exception, at.exception
+    assert any("Update" in b.label for b in at.button), "expected an update-in-place action"
+    assert any("Data roles KC" in b.label for b in at.button), "the button must name the profile"
+
+
+def test_ac_3_12_update_overwrites_rather_than_duplicating():
+    from dataclasses import replace
+
+    from src.profiles import PRESETS
+
+    original = PRESETS["data_science_student"]
+    at = _run("views/profile.py",
+              saved_profiles={"Data roles KC": original},
+              loaded_name="Data roles KC")
+    at.text_area(key="pf_goals").set_value("Now I want platform engineering work.").run()
+    _click(at, 'Update “Data roles KC”')
+    saved = dict(at.session_state["saved_profiles"])
+    assert list(saved) == ["Data roles KC"], "update must not create a second entry"
+    assert saved["Data roles KC"].career_goals == "Now I want platform engineering work."
+
+
+def test_ac_3_12_unsaved_profile_offers_plain_save():
+    at = _run("views/profile.py")
+    assert any(b.label == "Save profile" for b in at.button)
+    assert not any("Update" in b.label for b in at.button)

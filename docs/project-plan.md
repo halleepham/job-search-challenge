@@ -410,9 +410,16 @@ Nothing else shares this page. It is the sole entry point for every input the pi
   grouped under an Education heading, with years of experience under its own heading rather than
   beside them.
 - **AC-3.11** — **The profile survives navigation.** Returning to the form after a search shows it
-  filled in as submitted, with a **Clear form** control to start over, and the current profile can be
-  saved under a name and re-selected from the preset list. Re-entering a résumé and twelve fields to
-  change one salary figure is not an acceptable cost for adjusting a search.
+  filled in as submitted, with a **Clear form** control to start over. Re-entering a résumé and twelve
+  fields to change one salary figure is not an acceptable cost for adjusting a search.
+  **Keyed widgets are not sufficient (v1.1, 2026-09-11).** Streamlit discards the `session_state`
+  entry for any widget not rendered on the current run, so navigating to Matches and back emptied the
+  form despite every control being keyed. The submitted profile is a plain object and does survive,
+  so the form is restored from it when the widget keys are missing.
+- **AC-3.12** — **A saved profile can be updated in place.** When one is loaded, the form says which
+  profile is being edited and offers **Update “name”** as the primary action, with save-as-a-copy
+  available but requiring a new name. Editing a saved profile and being offered only "save as new"
+  makes the obvious action the one the interface does not have.
 - **AC-3.10** — **Résumé skills pre-fill the picker.** On résumé entry the REQ-2 extractor runs over
   the user's own text and adds what it finds to the selection — visible and removable, never applied
   silently. The form previously asked the user to recall skills from memory while their résumé sat in

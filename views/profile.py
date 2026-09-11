@@ -93,9 +93,16 @@ def clear_form() -> None:
     st.session_state.pop("profile_errors", None)
 
 
-# First visit only: nothing to restore, so seed sensible defaults.
+# Streamlit drops the session_state entry for any widget not rendered on the
+# current run, so navigating to Matches and back empties the form. The submitted
+# profile is a plain object and survives, so restore from it; only a genuinely
+# first visit gets blank defaults.
 if "pf_resume" not in st.session_state:
-    clear_form()
+    if "profile" in st.session_state:
+        load_into_form(st.session_state["profile"])
+        st.session_state["loaded_name"] = st.session_state.get("loaded_name")
+    else:
+        clear_form()
 
 st.title("Profile")
 st.caption("Tell us about yourself and what you're looking for. "
@@ -109,14 +116,23 @@ chosen = load_col.selectbox("Load a profile", options,
                             help="Your own saved profiles, then the built-in examples.")
 if chosen != "—" and load_col.button("Load", use_container_width=True):
     if chosen.startswith("Saved · "):
-        load_into_form(saved_profiles[chosen.removeprefix("Saved · ")])
+        name = chosen.removeprefix("Saved · ")
+        load_into_form(saved_profiles[name])
+        st.session_state["loaded_name"] = name        # so edits can be saved back
     else:
         name = chosen.removeprefix("Example · ")
         load_into_form(next(p for p in PRESETS.values() if p.name == name))
+        st.session_state.pop("loaded_name", None)     # an example is a starting point
     st.rerun()
 if clear_col.button("Clear form", use_container_width=True):
     clear_form()
+    st.session_state.pop("loaded_name", None)
     st.rerun()
+
+loaded_name = st.session_state.get("loaded_name")
+if loaded_name:
+    st.caption(f"Editing your saved profile **{loaded_name}**. "
+               "Changes are not kept until you update it.")
 
 st.divider()
 about, want = st.columns(2, gap="large")
@@ -225,7 +241,7 @@ def build() -> UserProfile:
         max_distance_miles=max_distance)
 
 
-search_col, save_col, name_col = st.columns([2, 1, 2])
+search_col, save_col, name_col = st.columns([2, 1.2, 2])
 # Validation runs on submit, not while the user is still filling the form.
 if search_col.button("Search jobs", type="primary", use_container_width=True):
     errors = validate_profile(resume_text, career_goals, skills, work_settings,
@@ -238,11 +254,27 @@ if search_col.button("Search jobs", type="primary", use_container_width=True):
         st.session_state.pop("selected_job", None)
         st.switch_page("views/results.py")
 
-save_name = name_col.text_input("Name", key="pf_save_name", placeholder="e.g. Data roles, KC",
-                                label_visibility="collapsed")
-if save_col.button("Save profile", use_container_width=True, disabled=not save_name.strip()):
-    saved_profiles[save_name.strip()] = build()
-    st.success(f"Saved as **{save_name.strip()}** — load it from the dropdown above.")
+if loaded_name:
+    # Editing an existing profile: updating it is the expected action, so it is
+    # the button. Saving a copy stays available but has to be asked for.
+    if save_col.button(f"Update “{loaded_name}”", use_container_width=True):
+        saved_profiles[loaded_name] = build()
+        st.success(f"Updated **{loaded_name}**.")
+    save_name = name_col.text_input("Save as a new profile instead", key="pf_save_name",
+                                    placeholder="new name…")
+    if save_name.strip() and name_col.button("Save as new"):
+        saved_profiles[save_name.strip()] = build()
+        st.session_state["loaded_name"] = save_name.strip()
+        st.success(f"Saved as **{save_name.strip()}**.")
+else:
+    save_name = name_col.text_input("Name", key="pf_save_name",
+                                    placeholder="e.g. Data roles, KC",
+                                    label_visibility="collapsed")
+    if save_col.button("Save profile", use_container_width=True,
+                       disabled=not save_name.strip()):
+        saved_profiles[save_name.strip()] = build()
+        st.session_state["loaded_name"] = save_name.strip()
+        st.success(f"Saved as **{save_name.strip()}** — load it from the dropdown above.")
 
 for message in st.session_state.get("profile_errors", []):
     st.warning(message)
