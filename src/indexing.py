@@ -176,7 +176,7 @@ class JobIndex:
     # ------------------------------------------------------------- search
 
     def calibration_for_scores(self, corpus_scores: np.ndarray,
-                               top_k: int = CALIBRATION_TOP_K) -> CalibrationConstants:
+                               top_k: int | None = None) -> CalibrationConstants:
         """
         AC-5.5 (v1.1): anchors for one semantic component, from the top-K of that
         component's *own* similarity distribution over the whole corpus.
@@ -195,11 +195,16 @@ class JobIndex:
         """
         if corpus_scores.size == 0:
             return self.calibration
-        k = min(top_k, corpus_scores.size)
-        top = np.sort(corpus_scores)[-k:]
+        # `top_k` slices a corpus-wide array down to the plausible candidates.
+        # When the caller has already narrowed to the scored population (the
+        # filter survivors), slicing again double-restricts: measured, that put
+        # the p5 floor at 0.501 against a survivor p5 of 0.235 and mapped 90% of
+        # everything scored to 0.0.
+        top = (corpus_scores if top_k is None
+               else np.sort(corpus_scores)[-min(top_k, corpus_scores.size):])
         return CalibrationConstants(
             p5=float(np.percentile(top, 5)), p95=float(np.percentile(top, 95)),
-            n_sampled=int(k), n_profiles=1,
+            n_sampled=int(top.size), n_profiles=1,
         )
 
     def search_dense(self, query: str, k: int = 200) -> list[tuple[int, float]]:

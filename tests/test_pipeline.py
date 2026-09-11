@@ -119,15 +119,25 @@ def test_retrieval_mode_is_selectable(index, profile, kb):
         assert search(JOBS, index, profile, kb, mode=mode).results
 
 
-def test_d13_small_survivor_set_skips_retrieval(index, profile, kb):
+def test_d13_v2_retrieval_always_runs(index, profile, kb):
     """
-    D13: below the threshold every eligible job is scored exactly, so no
-    top-scoring job can be discarded by an approximate stage.
+    D13 v2: retrieval is never skipped — `k` is sized by measured recall instead.
+    v1 skipped the stage below a threshold, which solved a k-sizing problem by
+    deleting the stage and left the report's comparison evaluating something the
+    application bypassed.
     """
     from src.pipeline import search
 
     out = search(JOBS, index, profile, kb)
-    assert out.funnel["retrieval"].startswith("skipped")
+    assert out.funnel["retrieval"].startswith("hybrid top-")
+
+
+def test_d13_v2_k_has_a_floor(index, profile, kb):
+    """Hybrid reaches 100% recall of the true top-20 at k=400, so 400 is the floor."""
+    from src.pipeline import MIN_RETRIEVE_K, search
+
+    out = search(JOBS, index, profile, kb)
+    assert f"top-{MIN_RETRIEVE_K}" in out.funnel["retrieval"]
 
 
 def test_d13_explicit_mode_still_uses_retrieval(index, profile, kb):

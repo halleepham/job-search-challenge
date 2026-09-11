@@ -200,3 +200,39 @@ def test_ac_2_5_unsectioned_description_all_required():
 def test_ac_2_5_nothing_found_is_empty_not_none():
     req, pref = extract_skills(description="We value teamwork and grit.", skills_desc=None)
     assert req == set() and pref == set()
+
+
+# ---------------------------------------------------------------- AC-2.2 v1.1
+# Single characters in prose are not evidence. Every case below was found in the
+# real corpus, where 645 postings matched `r` and 83 had it as their only skill.
+
+@pytest.mark.parametrize("text", [
+    "the P/R organization whose primary responsibility",     # slash
+    "meet mission r equirements. Provide technical input",   # word broken mid-token
+    "report to your Project Man******r. Recognize when",     # masked text
+    "R&D team builds prototypes",
+    "Contact HR for details",
+])
+def test_ac_2_2_v1_1_lone_letter_is_not_a_skill(text):
+    assert "r" not in match_skills(text)
+
+
+@pytest.mark.parametrize("text", [
+    "Programming experience with R and SAS",
+    "Strong Python, R, and SQL skills",
+    "Modelling in R or Python required",
+])
+def test_ac_2_2_v1_1_lone_letter_counts_beside_a_real_skill(text):
+    assert "r" in match_skills(text)
+
+
+def test_ac_2_2_v1_1_co_occurrence_must_be_nearby():
+    """A skill three paragraphs away is not context for a stray letter."""
+    far = "P/R organization. " + "filler " * 40 + "We also use Python."
+    assert "r" not in match_skills(far)
+    assert "python" in match_skills(far)
+
+
+def test_ac_2_2_v1_1_multi_letter_skills_need_no_neighbour():
+    """Only single characters are gated — a lone 'python' is still evidence."""
+    assert match_skills("Python developer wanted") == {"python"}

@@ -44,8 +44,13 @@ _OTHER_HEADING = re.compile(
 #: Boundary guards. `&` is excluded on both sides so "R&D" does not yield "R";
 #: `+`, `#` and `.` are excluded so "C++", "C#" and ".net" match as whole terms
 #: rather than as prefixes of longer tokens.
-_LEFT = r"(?<![\w+#.&])"
-_RIGHT = r"(?![\w+#&])"
+_LEFT = r"(?<![\w+#.&/*])"
+_RIGHT = r"(?![\w+#&/*])"
+
+#: AC-2.2 v1.1: a single character in prose is not evidence. These count only
+#: when another recognised skill sits within CO_OCCURRENCE_WINDOW characters, so
+#: "experience with R and SAS" counts while "P/R organization" does not.
+CO_OCCURRENCE_WINDOW = 40
 
 
 @dataclass(frozen=True)
@@ -88,8 +93,23 @@ def match_skills(text: str | None, vocab: Vocabulary | None = None) -> set[str]:
     if not text:
         return set()
     vocab = vocab or load_vocabulary()
-    return {vocab.surface_to_canonical[m.group(0).lower()]
-            for m in vocab.pattern.finditer(text)}
+    hits = [(m.start(), m.end(), vocab.surface_to_canonical[m.group(0).lower()])
+            for m in vocab.pattern.finditer(text)]
+
+    multi = [(a, b) for a, b, name in hits if len(name) > 1]
+    found = {name for _, _, name in hits if len(name) > 1}
+
+    # A single-letter skill needs a neighbour: measured on the corpus, 645
+    # postings matched `r` and 83 had it as their only skill - from "P/R
+    # organization", "mission r equirements" and "Project Man******r".
+    for start, end, name in hits:
+        if len(name) == 1 and any(
+            start - CO_OCCURRENCE_WINDOW <= other_end
+            and other_start <= end + CO_OCCURRENCE_WINDOW
+            for other_start, other_end in multi
+        ):
+            found.add(name)
+    return found
 
 
 def split_sections(description: str | None) -> dict[str, str]:

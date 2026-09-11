@@ -162,9 +162,19 @@ def employment_type_passes(job: pd.Series, profile: UserProfile) -> bool:
     return value == "Unknown" or value in profile.accepted_employment_types
 
 
+#: AC-6.8 v1.1: tools so common they carry no signal about fit. `excel` is the
+#: most-extracted skill in the corpus (3,498 postings); sharing Microsoft Word
+#: with a posting is not evidence. They still SCORE under AC-9.3 - they simply
+#: cannot be the sole reason a job is considered.
+GENERIC_SKILLS = frozenset(
+    {"excel", "word", "powerpoint", "outlook", "sharepoint", "windows"}
+)
+
+
 def skill_floor_passes(job: pd.Series, profile: UserProfile) -> bool:
-    """AC-6.8: at least one shared required skill."""
-    return bool(as_set(job.get("required_skills")) & profile.skills)
+    """AC-6.8: at least one shared required skill that is not a generic office tool."""
+    shared = as_set(job.get("required_skills")) & profile.skills
+    return bool(shared - GENERIC_SKILLS)
 
 
 # --- vectorized masks (AC-6.1) ----------------------------------------------
@@ -218,7 +228,8 @@ def _skill_floor_mask(jobs: pd.DataFrame, profile: UserProfile) -> pd.Series:
     """
     skills = profile.skills
     return pd.Series(
-        [bool(as_set(v) & skills) for v in jobs["required_skills"]], index=jobs.index
+        [bool((as_set(v) & skills) - GENERIC_SKILLS) for v in jobs["required_skills"]],
+        index=jobs.index
     )
 
 

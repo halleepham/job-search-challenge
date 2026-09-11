@@ -286,3 +286,40 @@ def test_ac_6_1_warm_path_is_within_budget(corpus):
     big = pd.concat([corpus] * 3000, ignore_index=True)
     t = time.time(); apply_filters(big, profile()); elapsed = time.time() - t
     assert elapsed < 0.8, f"filtering {len(big):,} rows took {elapsed:.2f}s"
+
+
+# ---------------------------------------------------------------- AC-6.8 v1.1
+
+def test_ac_6_8_generic_tools_cannot_carry_a_job_alone():
+    """
+    The radiology posting that prompted this has required_skills=['word'].
+    Sharing Microsoft Word is not evidence of fit.
+    """
+    p = profile(skills={"word", "excel", "python"})
+    assert not skill_floor_passes(job(required_skills=["word"]), p)
+    assert not skill_floor_passes(job(required_skills=["excel", "powerpoint"]), p)
+
+
+def test_ac_6_8_generic_tools_still_pass_alongside_a_real_skill():
+    p = profile(skills={"word", "python"})
+    assert skill_floor_passes(job(required_skills=["word", "python"]), p)
+
+
+def test_ac_6_8_generic_exclusion_is_vectorized_too(corpus):
+    """The mask and the predicate must agree here as everywhere else."""
+    from src.filters import _skill_floor_mask
+
+    p = profile(skills={"word"})
+    rows = corpus.apply(skill_floor_passes, axis=1, args=(p,)).tolist()
+    assert _skill_floor_mask(corpus, p).tolist() == rows
+
+
+def test_ac_6_7_regression_full_time_only(corpus):
+    """
+    Reported: "I asked for Full-time only and got an internship." Not reproduced,
+    but pinned so it cannot start being true.
+    """
+    mixed = pd.concat([corpus, corpus.assign(job_id=99, employment_type="Internship")],
+                      ignore_index=True)
+    kept, _ = apply_filters(mixed, profile(accepted_employment_types={"Full-time"}))
+    assert set(kept["employment_type"]) <= {"Full-time"}

@@ -51,7 +51,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 | D9 | **DuckDB (SQL) for offline ingestion and analytics; pandas for the query-time path** | The corpus is ~124k rows / ~800MB — it fits single-machine, so Spark's JVM startup and shuffle overhead exceed its benefit. DuckDB is columnar, vectorized, out-of-core, and pip-installable with no JVM. REQ-1's join/filter/dedupe and REQ-12's aggregations are naturally SQL. The crossover point where distributed execution would win is documented instead of assumed | PySpark (real setup cost, no gain at this scale); pandas alone (786k-row scale test gets memory-tight, manual chunking) |
 | D10 | **No cross-encoder. Removed entirely (REQ-8 → Non-Goals)** | Accepted from the AI at Stage 2, removed at Stage 3 once filter-first (D2) made it redundant. The assignment never asks for reranking — report §6 and §9 name BM25, embeddings and hybrid retrieval only. In this architecture it would trim 200 candidates to 50 before scoring, but scoring 200 costs milliseconds, and jobs that survive retrieval without merit simply score low and never reach the top 5. It saves no meaningful compute and duplicates work the scorer already does. It also carries an opacity cost either way: as a score component it would put an unjustifiable term inside the breakdown, and as a pruner it can silently drop a good job with no signal to the user — pruning relocates that opacity rather than removing it | Cross-encoder as a weighted score component (unexplainable term in the score); cross-encoder as a pruner (retained the opacity, earned too little to justify it) |
 | D11 | **No LLM in the application. Evidence is retrieved, not generated** | Every number and every quote the user sees is produced by deterministic code: scores from REQ-9, supporting résumé text from REQ-4's semantic retrieval with verifiable character spans. The co-design prep's "Practice with Agentic AI" section was a prompt-engineering exercise — practice at directing an AI — not a component of the product, and building it in would have added an API key, a cost, and a reproducibility barrier (a grader cannot run it) for something the assignment never required. Report §6 asks about an LLM's role only *if* one is used | A hosted LLM explanation layer (removed, see REQ-10); LLM-computed scores (drift between runs, untestable) |
-| D13 | **Retrieval is skipped when the filter survivors fit; every eligible job is scored exactly** | Measured (AC-13.1 v1.1): retrieving top-200 recovered only **45-95%** of the true top-20 by score, so the approximate stage was discarding jobs the exact stage wanted. Scoring every survivor instead costs ~220 ms more (877 ms vs 656 ms for the largest profile) and produced an **identical top-5** for all three reference profiles. Exactness is available for a fifth of a second, so the approximation is not worth its recall loss at this corpus size. Retrieval is retained above `SCORE_ALL_THRESHOLD` and remains the scalability path — the same reasoning as D9: use the heavier machinery when the data demands it, and *measure* rather than assume that it does | Always retrieving top-200 (loses top-scoring jobs); removing retrieval entirely (would leave no path at larger scale, and forfeit the report §9 comparison) |
+| D13 | **Retrieval always runs; `k` is chosen by measured recall** (v2). `k = max(400, 25% of survivors)` | **Revised 2026-09-11 after measuring `k` properly.** v1 skipped retrieval below 2,500 survivors because top-200 recovered only **45-95%** of the true top-20 by score, so the approximate stage was discarding jobs the exact stage wanted. Scoring every survivor instead costs ~220 ms more (877 ms vs 656 ms for the largest profile) and produced an **identical top-5** for all three reference profiles. Exactness is available for a fifth of a second, so the approximation is not worth its recall loss at this corpus size. But extending the sweep showed that was a property of **k=200, not of retrieval**: hybrid reaches **100% recall at k=400**, before either single retriever (BM25 alone needs k=1400). The fix is to size `k` by measurement, not to bypass the stage. Retrieval now always runs at `k = max(400, 25% of survivors)` — zero measured recall loss, and the pipeline the report describes is the one that runs. Skipping it would also have left the §9 comparison evaluating a stage the application bypassed | Skipping retrieval below a threshold (v1 — solved a `k`-sizing problem by deleting the stage); a fixed k=200 |
 | D12 | **Industry is dropped from the score** | Scope, not data quality. Stage 1 gave it only 0.10 of the manual score, and the deadline does not allow a component that small to earn its implementation and test cost. **Correction (2026-09-08):** this decision was originally justified as "industry labels are inconsistent across sources" — the schema audit refuted that. `job_industries.csv` is 0% null on both columns and `mappings/industries.csv` carries 422 clean industry names. The data is good; the reason for dropping it is priority. Recorded as an explicit rejection, not an omission, and a strong candidate for report §12 future work | Keeping the Stage 1 industry component |
 
 ### 0.4 Architecture
@@ -267,7 +267,7 @@ which is what makes the optional engine comparison in AC-13.4 cheap.
 
 ## REQ-2: Skill vocabulary and extraction
 
-**Status:** FROZEN v1.0 (2026-09-08) — **IMPLEMENTED**, all ACs pass (60 tests)
+**Status:** FROZEN v1.1 (2026-09-11) — IMPLEMENTED
 **Traces to:** report §5 (skill extraction, feature construction), §6 (skill similarity)
 **Tests:** `tests/test_req2_skills.py`
 
@@ -294,6 +294,12 @@ canonical gazetteer terms.
   match "MongoDB"; "R" must match "R and Python" but not "R&D" or "HR". This is the single most
   important test in the suite — it is the exact defect in the Stage 2 AI code
   (`agent-exercise:src/matcher.py`, `match_skill_presence`).
+  **Boundary set extended and single-letter terms gated (v1.1, 2026-09-11).** Measured: 645 postings
+  had `r` extracted, 83 as their *only* skill. The matches were `"P/R organization"` (a slash is not
+  a word character), `"mission r equirements"` (a word broken mid-token in the source), and
+  `"Project Man******r"` (masked text). `/` and `*` are now boundary characters, **and a
+  single-letter skill counts only when another recognised skill appears within 40 characters** — so
+  `"experience with R and SAS"` counts and `"P/R organization"` does not.
 - **AC-2.3** — **`description` section-parsing is the primary extraction path** (AC-2.4);
   `skills_desc` is a supplement applied only where present, and its gazetteer matches go to the
   **required** bucket. The two results are unioned, with `required` winning any conflict.
@@ -330,7 +336,7 @@ is buying almost nothing and REQ-9 should be revised through the spec-change pro
 
 ## REQ-3: Profile input page
 
-**Status:** FROZEN v1.1 (2026-09-11)
+**Status:** FROZEN v1.2 (2026-09-11) — IMPLEMENTED
 **Traces to:** report §1 (user inputs), §8 (final application)
 **Tests:** `tests/test_req3_profile.py` (validation logic only; widget rendering is not unit-tested)
 
@@ -395,6 +401,11 @@ Nothing else shares this page. It is the sole entry point for every input the pi
   is never a dead end. Education is split into *Highest completed* and *Currently studying for*,
   grouped under an Education heading, with years of experience under its own heading rather than
   beside them.
+- **AC-3.10** — **Résumé skills pre-fill the picker.** On résumé entry the REQ-2 extractor runs over
+  the user's own text and adds what it finds to the selection — visible and removable, never applied
+  silently. The form previously asked the user to recall skills from memory while their résumé sat in
+  the next field and the extractor that reads job postings could have read it equally well; a user who
+  did not think to list "machine learning" was scored as not having it.
 - **AC-3.9** — **Validation is silent until submit.** Nothing is reported while the user is still
   filling the form; messages appear only after Search is pressed, naming the fields that block it.
   Warning about a field the user has not reached yet is noise, not help.
@@ -466,7 +477,7 @@ index is needed on this side.
 
 ## REQ-5: Job corpus indexing and calibration
 
-**Status:** FROZEN v1.1 (2026-09-09)
+**Status:** FROZEN v1.2 (2026-09-11) — IMPLEMENTED
 **Traces to:** report §5 (storage, indexing), §6 (embeddings, BM25)
 **Tests:** `tests/test_req5_indexing.py`
 
@@ -498,8 +509,12 @@ All three are computed once and cached; recomputing on app start would make the 
   the score is actually applied to. For each of the ≥3 reference profiles, take its **top-`RETRIEVE_K`
   most similar jobs** — the candidates that survive to scoring — pool those similarities across
   profiles, and persist the 5th and 95th percentiles to `calibration.json`.
-  **Anchors are per-profile, computed at query time** from that profile's own top-`RETRIEVE_K` over
-  the whole corpus (~5 ms — one matrix multiply against precomputed vectors). Pooling anchors across
+  **Anchors are per-profile, computed at query time** from that profile's similarity distribution
+  over the **filter survivors** — the population that is actually scored. Anchoring on the corpus-wide
+  top-`RETRIEVE_K` instead (v1.1) put the p5 floor above most of what gets scored: a job ranking first
+  by *total* score is frequently not top-200 by *goals* similarity, so both semantic components
+  returned **0.00 for four of the top five results**, making 30% of the weight structurally
+  unavailable — a perfect skills match scored 67/100 for that reason alone (v1.2, 2026-09-11) (~5 ms — one matrix multiply against precomputed vectors). Pooling anchors across
   reference profiles was tried and failed: résumés differ in length and vocabulary, so their
   similarity scales differ, and pooled anchors that discriminated for one profile mapped another's
   entire top-5 to 0.0. Pool-independence (D8) still holds — the anchors depend only on the profile
@@ -524,7 +539,7 @@ All three are computed once and cached; recomputing on app start would make the 
 
 ## REQ-6: Hard filters
 
-**Status:** FROZEN v1.0 (2026-09-09)
+**Status:** FROZEN v1.1 (2026-09-11) — IMPLEMENTED
 **Traces to:** report §6 (matching method), §4 (co-design — corrected AI's missing filter layer)
 **Tests:** `tests/test_req6_filters.py`
 
@@ -557,9 +572,17 @@ Non-negotiable constraints applied as vectorized boolean masks over the full ser
   with the salary policy.
 - **AC-6.7** — **Employment type.** A job passes when `job.employment_type ∈ user.accepted_employment_types`.
   `Unknown` passes and is tagged, same policy.
-- **AC-6.8** — **Skill floor.** A job passes when at least one of its `required_skills` is in the user's
-  normalized skill set. Because zero-skill postings were dropped at ingestion (AC-2.6), this filter
-  never encounters an empty required list.
+- **AC-6.8** — **Skill floor.** A job passes when at least one of its `required_skills` is in the
+  user's normalized skill set **and is not a generic office tool** (`excel`, `word`, `powerpoint`,
+  `outlook`, `sharepoint`, `windows`). Because zero-skill postings were dropped at ingestion
+  (AC-2.6), this filter never encounters an empty required list.
+  **Generic-tool exclusion added v1.1 (2026-09-11).** `excel` is the most common extracted skill in
+  the corpus (3,498 postings) and the top co-occurring pairs are `excel+word` and `excel+powerpoint`.
+  Sharing Microsoft Word with a posting is not evidence of fit, and it was the route by which
+  unrelated roles reached the results — the radiology posting that prompted this has
+  `required_skills=['word']`. Generic tools still **score** normally under AC-9.3; they simply cannot
+  be the sole reason a job is considered. A core/generic split was declined on 2026-09-08 and
+  re-opened when measurement showed it producing exactly the reported symptom.
 - **AC-6.9** — Filters compose with AND, and the function returns a funnel: the survivor count after
   each individual filter. This is surfaced in the UI (AC-11.2) and cited in the report.
 - **AC-6.10** — When the funnel empties, the system reports which filter eliminated the most candidates
@@ -599,12 +622,32 @@ a single candidate list.
 
 ---
 
-## REQ-8: ~~Cross-encoder pruning~~ — **REMOVED**
+## REQ-8: Cross-encoder reranking — **OPTIONAL, EVALUATED**
 
-**Status:** REMOVED 2026-09-08 (never implemented; no code was written against it)
+**Status:** FROZEN v2.0 (2026-09-11) — implemented, **off by default**, compared in REQ-13
 
-Specified a cross-encoder scoring (profile, job) pairs jointly to trim the candidate list from 200
-to 50 before scoring. Removed from scope; the number is retained rather than reused.
+**Reinstated as an optional, measured stage (v2.0, 2026-09-11).** Removed on 2026-09-08 as
+unjustifiable; brought back because it is a named methodology the evaluation should *compare* rather
+than assert away. Implemented, **disabled by default**, with cost and benefit reported in AC-13.1's
+four-way comparison.
+
+A cross-encoder reads the (profile, job) pair as a **single** input and attends across both, unlike a
+bi-encoder whose vectors are computed separately. More accurate per pair, but one forward pass per
+pair — so it can only run over a shortlist.
+
+**Why it stays off by default.** At `k=400` hybrid retrieval already recovers **100%** of the true
+top-20 by score, so there is nothing left for a reranker to recover, and it would add seconds to a
+sub-second search. The explainability objection stands too: a cross-encoder score is undecomposable,
+so it cannot enter a score built to be decomposable (D10).
+
+**Acceptance criteria**
+- **AC-8.1** — `cross-encoder/ms-marco-MiniLM-L-6-v2` scores the retrieved candidates and the top-K
+  are retained. Enabled by explicit flag; never on by default.
+- **AC-8.2** — Cross-encoder scores never appear in the match score, the breakdown, or the UI.
+- **AC-8.3** — AC-13.1 compares four configurations — BM25 · dense · hybrid · hybrid+rerank —
+  reporting recall **and added latency**, so cost is visible beside benefit.
+- **AC-8.4** — If reranking does not improve recall over hybrid alone, that is the finding and the
+  stage stays off.
 
 **Why.** It was accepted at Stage 2 from the AI's recommendation *"add a reranker + feedback →
 re-rank loop"* (co-design prep §1). The feedback half was already cut; this is the other half.
@@ -980,12 +1023,11 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 **Stretch — build only if the must-ship list is complete:**
 - Local Hugging Face narrative generation over the already-retrieved evidence (REQ-10 stretch note).
-- Cross-encoder reranking or pruning (REQ-8, removed — see D10).
 - LLM-based résumé field extraction (manual entry is the guaranteed path).
 - A PySpark implementation of the ingestion job, for the engine-comparison timing in AC-13.4.
 - Lazy explanation generation below the top 5.
 
-**Must ship:** REQ-1 through REQ-7, REQ-9, and REQ-11 through REQ-14. (REQ-8 and REQ-10 are removed.)
+**Must ship:** REQ-1 through REQ-7, REQ-9, REQ-11 through REQ-14. REQ-8 ships disabled and evaluated; REQ-10 is removed.
 
 ---
 
@@ -1008,6 +1050,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-11 | D13 (→v2), AC-5.5 (→v1.2), AC-2.2 (→v1.1), AC-6.8 (→v1.1), REQ-8 (reinstated v2.0), AC-3.10 (new) | Retrieval always runs at measured `k`; calibration anchors on filter survivors; `/` and `*` added to skill boundaries with single-letter terms gated on co-occurrence; generic office tools excluded from the skill floor; cross-encoder reinstated off-by-default and evaluated; résumé skills pre-fill the form | Five problems reported from real use, four reproduced. The common thread is that each was a measurement never taken: `k=200` was a round number (hybrid hits 100% recall at 400); calibration still anchored on the retrieval population after D13 changed what gets scored, zeroing 30% of the weight; `r` matched `P/R` and mangled text because the boundary set came from three test cases; and `excel` satisfying the skill floor was declined on 2026-09-08, then re-opened when it produced exactly the reported symptom |
 | 2026-09-11 | AC-3.2, AC-3.9 (new) (REQ-3 → v1.1) | Display capitalisation for normalized values; job titles derived from the corpus with free text accepted; education split into two clearly-named fields; validation deferred until submit | The form exposed internal normalization ("python, sql, aws") as if it were user-facing text; the title list was 15 strings written by hand, so a real title like "data science engineer" simply did not exist; "Education" beside "Studying for" beside "Years of experience" read as three versions of one question; and warnings fired for fields the user had not reached yet |
 | 2026-09-11 | AC-11.12 (REQ-11 → v1.3) | Decisions require explicit confirmation and now have a destination — a **My jobs** page grouped by status, with removal and CSV export | Selecting a radio filed the job immediately and confirmed it in a caption at the very bottom of the page, where the user would not see it. A stray click should not silently change a decision, and an action with no destination is not an action |
 | 2026-09-11 | REQ-11 §layout, app structure | Sidebar navigation replaced with a top navigation bar carrying the product name ("Job Matcher") on every page; pages are Profile · Matches · My jobs · Insights | The sidebar consumed a large share of the viewport and the product had no persistent identity. Implemented with `st.navigation(position="hidden")` plus `st.page_link`, so routing stays declarative |

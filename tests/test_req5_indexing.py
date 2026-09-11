@@ -166,3 +166,25 @@ def test_ac_5_8_calibration_shares_the_manifest(index):
     """AC-5.8: same invalidation as the indexes."""
     assert (index.index_dir / "calibration.json").exists()
     assert (index.index_dir / "manifest.json").exists()
+
+
+def test_calibration_on_a_narrowed_population_is_not_sliced_again(index):
+    """
+    Regression: passing the already-narrowed survivor distribution while the
+    method still took its top-200 double-restricted the anchors — p5 landed at
+    0.501 against a survivor p5 of 0.235, mapping 90% of scored jobs to 0.0 and
+    making 30% of the rubric structurally unavailable.
+    """
+    scores = np.linspace(0.0, 1.0, 1000)
+    whole = index.calibration_for_scores(scores)
+    sliced = index.calibration_for_scores(scores, top_k=200)
+    assert whole.p5 == pytest.approx(0.05, abs=0.02), "should describe the whole population"
+    assert sliced.p5 > whole.p5, "explicit top_k must still narrow"
+
+
+def test_calibration_spreads_a_narrowed_population(index):
+    """Most of the scored population must land strictly between 0 and 1."""
+    scores = np.linspace(0.2, 0.6, 1000)
+    cal = index.calibration_for_scores(scores)
+    mapped = np.array([cal.apply(float(s)) for s in scores])
+    assert ((mapped > 0.0) & (mapped < 1.0)).mean() > 0.8

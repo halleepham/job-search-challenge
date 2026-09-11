@@ -198,3 +198,52 @@ def test_ac_11_9_body_without_a_heading_is_untouched():
     result["evidence"] = [{"text": "Built ETL pipelines in Airflow.", "section": "experience",
                            "char_span": (0, 31), "similarity": 0.7}]
     assert evidence_table(result, PROFILE).iloc[0]["Evidence"] == "Built ETL pipelines in Airflow."
+
+
+def test_ac_11_3_displayed_points_sum_exactly_to_the_score():
+    """
+    Rounding each component then adding does not equal rounding the total —
+    eight values at 0.1 precision drifted to 78.5 against a card reading 79.
+    Largest-remainder allocation makes the displayed breakdown add up exactly.
+    """
+    result = make_result()
+    assert component_bars(result)["Earned"].sum() == pytest.approx(result["score"], abs=0.051)
+
+
+@pytest.mark.parametrize("score", [0, 37, 49, 50, 73, 99, 100])
+def test_ac_11_3_holds_across_scores(score):
+    result = make_result()
+    result["score"] = score
+    total = sum(c["weighted"] for c in result["components"]) or 1
+    for c in result["components"]:                      # rescale to the target score
+        c["weighted"] = c["weighted"] / total * (score / 100)
+    assert component_bars(result)["Earned"].sum() == pytest.approx(score, abs=0.051)
+
+
+@pytest.mark.parametrize("nudge", [0.0, 0.004, -0.004, 0.0049, -0.0049])
+def test_ac_11_3_holds_when_the_exact_total_rounds_either_way(nudge):
+    """
+    Regression: the allocation only handled a surplus. When the exact total
+    rounded *down* the residual was negative, nothing was subtracted, and the
+    table read 81.1 against a card saying 81.
+    """
+    result = make_result()
+    result["components"][0]["weighted"] += nudge
+    result["score"] = round(sum(c["weighted"] for c in result["components"]) * 100)
+    assert component_bars(result)["Earned"].sum() == pytest.approx(result["score"], abs=0.051)
+
+
+def test_ac_11_3_dropped_components_cannot_swallow_a_shortfall():
+    """
+    Regression: a dropped component sits at 0 points and has the smallest
+    remainder, so it was selected first to absorb a decrement it could not give.
+    The residual went unconsumed and the table read 81.1 against a card of 81.
+    """
+    result = make_result()
+    for c in result["components"][2:]:          # leave only skills + a dropped row
+        c["sub_score"], c["weight"], c["weighted"] = None, 0.0, 0.0
+    result["components"][0]["weighted"] = 0.8147
+    result["score"] = round(sum(c["weighted"] for c in result["components"]) * 100)
+    bars = component_bars(result)
+    assert bars["Earned"].sum() == pytest.approx(result["score"], abs=0.051)
+    assert (bars["Earned"] >= 0).all(), "no component may render negative points"

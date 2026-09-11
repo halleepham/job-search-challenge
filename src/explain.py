@@ -33,13 +33,42 @@ def component_bars(result: dict) -> pd.DataFrame:
     `max_points` uses the *effective* weight after AC-9.4's renormalization, so a
     dropped component shows 0/0 rather than appearing to have been failed.
     """
+    exact = [c["weighted"] * 100 for c in result["components"]]
+
+    # Largest-remainder allocation so the displayed points sum *exactly* to the
+    # displayed score. Rounding each component independently and adding them does
+    # not: eight values rounded to 0.1 drifted to 78.5 against a card reading 79,
+    # and a breakdown that does not add up is not a breakdown.
+    tenths = [int(v * 10) for v in exact]
+    residual = round(result["score"] * 10) - sum(tenths)
+
+    # Rows with the largest fractional remainder absorb a surplus; rows with the
+    # smallest absorb a shortfall. Two things make a naive pass wrong: a negative
+    # residual (the exact total rounds *down*, which is common), and rows already
+    # at zero - dropped components have both the smallest remainder and nothing
+    # to give, so they would silently swallow a decrement. Cycle until the
+    # residual is actually consumed.
+    order = sorted(range(len(exact)), key=lambda i: -((exact[i] * 10) - tenths[i]))
+    if residual < 0:
+        order = order[::-1]
+    step = 1 if residual > 0 else -1
+    remaining, guard = abs(residual), 0
+    while remaining and guard < 1000:
+        for i in order:
+            if not remaining:
+                break
+            if step < 0 and tenths[i] == 0:
+                continue                     # nothing left to take from this row
+            tenths[i] += step
+            remaining -= 1
+        guard += 1
+
     rows = []
-    for c in result["components"]:
-        max_points = c["weight"] * 100
+    for c, points in zip(result["components"], tenths):
         rows.append({
             "Component": COMPONENT_LABELS[c["name"]],
-            "Earned": round(c["weighted"] * 100, 1),
-            "Max": round(max_points, 1),
+            "Earned": round(points / 10, 1),
+            "Max": round(c["weight"] * 100, 1),
             "Fraction": (c["weighted"] / c["weight"]) if c["weight"] else 0.0,
             "Dropped": c["sub_score"] is None,
         })

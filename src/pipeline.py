@@ -28,7 +28,16 @@ from src.scoring import score_job
 #: Candidates that receive full scoring when retrieval is used.
 RETRIEVE_K = 200
 
-#: D13 - below this many filter survivors, skip retrieval and score all of them.
+#: D13 v2 - retrieval always runs; `k` is sized by measured recall. Hybrid reaches
+#: 100% recall of the true top-20 at k=400 (BM25 alone needs 1400), so 400 is the
+#: floor and a quarter of the survivor set scales it upward. v1 skipped retrieval
+#: entirely below a threshold, which solved a k-sizing problem by deleting the
+#: stage - and left the report's retrieval comparison evaluating something the
+#: application bypassed.
+MIN_RETRIEVE_K = 400
+RETRIEVE_FRACTION = 0.25
+
+#: Retained only so older callers keep working; no longer consulted.
 #: Measured: scoring every survivor costs ~220 ms more than retrieving 200 and
 #: produced an identical top-5 for all three reference profiles, while retrieval
 #: at k=200 recovered only 45-95% of the true top-20 by score (AC-13.1). Exact is
@@ -54,7 +63,8 @@ def search(
     kb: PersonalKB | None = None,
     mode: str = "hybrid",
     top_n: int = TOP_N,
-    retrieve_k: int = RETRIEVE_K,
+    retrieve_k: int | None = None,
+    rerank: bool = False,
 ) -> SearchResult:
     """
     Run one search. *jobs* and *index* must describe the same corpus in the same
@@ -71,13 +81,15 @@ def search(
 
     t = time.perf_counter()
     candidates = [position_of[j] for j in kept["job_id"]]
-    if len(candidates) <= SCORE_ALL_THRESHOLD and mode == "hybrid":
-        # D13: exact - every eligible job is scored, no candidate is discarded.
-        hits = [(p, 0.0) for p in candidates]
-        funnel["retrieval"] = "skipped (scored every survivor)"
+    k = retrieve_k or max(MIN_RETRIEVE_K, int(len(candidates) * RETRIEVE_FRACTION))
+    hits = retrieve(index, profile, candidate_positions=candidates, mode=mode, k=k)
+    if rerank:                                              # REQ-8, off by default
+        from src.rerank import rerank_candidates
+
+        hits = rerank_candidates(index, jobs, profile, hits, top_k=max(50, len(hits) // 4))
+        funnel["retrieval"] = f"{mode} top-{k} + cross-encoder rerank"
     else:
-        hits = retrieve(index, profile, candidate_positions=candidates, mode=mode, k=retrieve_k)
-        funnel["retrieval"] = f"{mode} top-{retrieve_k}"
+        funnel["retrieval"] = f"{mode} top-{k}"
     timings["retrieve"] = (time.perf_counter() - t) * 1000
 
     # Semantic sub-scores, calibrated against the fixed background (AC-9.11).
@@ -94,7 +106,11 @@ def search(
 
     if profile.career_goals:
         goals_vec = embed([profile.career_goals])[0]
-        goals_cal = index.calibration_for_scores(index.embeddings @ goals_vec)
+        # AC-5.5 v1.2: anchor on the population that is actually scored - the
+        # filter survivors - not the corpus-wide top-k. Anchoring on the latter
+        # put the p5 floor above most scored jobs, zeroing 30% of the weight.
+        goals_cal = index.calibration_for_scores(
+            index.embeddings[np.asarray(candidates)] @ goals_vec)
         goals_raw = job_vecs @ goals_vec
 
     # AC-9.10: evidence excludes the career-goals chunk, which AC-9.9 already scores.
@@ -103,7 +119,7 @@ def search(
         if mask.any():
             chunk_vecs = kb.embeddings[mask]
             evidence_cal = index.calibration_for_scores(
-                (index.embeddings @ chunk_vecs.T).max(axis=1))
+                (index.embeddings[np.asarray(candidates)] @ chunk_vecs.T).max(axis=1))
             evidence_raw = (job_vecs @ chunk_vecs.T).max(axis=1)
 
     scored = []

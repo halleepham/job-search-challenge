@@ -86,9 +86,19 @@ with about:
         value=preset.career_goals if preset else "", height=80,
         placeholder="e.g. a data engineering role building pipelines that feed dashboards")
 
+    # AC-3.10: the extractor that reads job postings reads the user's résumé too,
+    # so skills they have but did not think to list are not scored as absent.
+    from src.skills import match_skills
+
+    from_documents = match_skills(f"{resume_text} {career_goals}") if resume_text else set()
+    seeded = set(preset.skills) if preset else set()
+    seeded |= from_documents
     picked = st.multiselect("Your skills", list(skills_map),
-                            default=[pretty(s) for s in sorted(preset.skills)
-                                     if pretty(s) in skills_map] if preset else [])
+                            default=[pretty(x) for x in sorted(seeded)
+                                     if pretty(x) in skills_map])
+    if from_documents:
+        st.caption(f"✨ Found {len(from_documents)} skill(s) in what you pasted — "
+                   "remove anything that isn't yours.")
     typed = st.text_input("Other skills, comma-separated",
                           placeholder="e.g. Cobol, SAS, Snowflake")
     skills = to_canonical(picked, skills_map) | to_canonical(typed.split(","), {})

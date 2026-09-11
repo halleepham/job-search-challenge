@@ -129,10 +129,15 @@ def test_ac_11_3_breakdown_sums_to_the_displayed_score():
     jobs = pd.read_parquet("data/processed/jobs_tech.parquet")
     index = JobIndex.load_or_build(jobs)
     p = PRESETS["data_science_student"]
+    from src.explain import component_bars
+
     res = search(jobs, index, p, PersonalKB.build(p.resume_text, p.career_goals))
     for r in res.results:
-        shown = sum(round(c["weighted"] * 100, 1) for c in r["components"])
-        assert abs(shown - r["score"]) < 0.5, f"table sums to {shown}, card says {r['score']}"
+        # Assert on what the page renders, not on a second implementation of the
+        # same arithmetic - that is how the 78.5-vs-79 drift stayed invisible.
+        shown = component_bars(r)["Earned"].sum()
+        assert abs(shown - r["score"]) < 0.051, \
+            f"table sums to {shown}, card says {r['score']}"
 
 
 def test_ac_11_8_to_11_13_panels_render():
