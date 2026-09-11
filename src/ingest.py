@@ -416,7 +416,7 @@ CORPUS_SCHEMA = [
     "work_setting", "work_setting_inferred", "employment_type", "min_years_exp",
     "min_years_exp_source", "education_required", "salary_min", "salary_max",
     "salary_listed", "salary_source", "required_skills", "preferred_skills",
-    "n_required_skills", "description", "posted_date",
+    "n_required_skills", "description", "posted_date", "expiry_date", "posting_url",
 ]
 
 
@@ -477,6 +477,14 @@ def build_corpus(
     df["posted_date"] = pd.to_datetime(
         df.get("listed_time"), unit="ms", errors="coerce"
     ).dt.date
+    # AC-1.11: the source posting and when it closed. Every posting in this
+    # historical corpus has expired, and the UI has to be able to say so.
+    # `df.get` yields None for an absent column, and pd.to_datetime(None) is not
+    # a Series - so guard rather than assume every source carries these.
+    expiry = df["expiry"] if "expiry" in df.columns else pd.Series(pd.NaT, index=df.index)
+    df["expiry_date"] = pd.to_datetime(expiry, unit="ms", errors="coerce").dt.date
+    df["posting_url"] = (df["job_posting_url"] if "job_posting_url" in df.columns
+                         else pd.Series(None, index=df.index, dtype="object"))
     for col in CORPUS_SCHEMA:
         if col not in df.columns:
             df[col] = None

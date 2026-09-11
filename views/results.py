@@ -112,6 +112,18 @@ with detail:
         s.caption(f"{TIER_ICON[r['tier']]} {r['tier']}")
         st.markdown(f"**{headline}.** {advice}")
 
+        # AC-11.14: every posting in this historical corpus has closed. Linking
+        # without saying so would imply an application is still possible.
+        expiry = job.get("expiry_date")
+        url = job.get("posting_url")
+        link_col, warn_col = st.columns([1, 3])
+        if url:
+            link_col.link_button("View original posting ↗", url, use_container_width=True)
+        warn_col.warning(
+            f"This posting closed on **{expiry}**. The dataset is historical "
+            "(LinkedIn, Dec 2023 – Apr 2024), so it is a record of a real job, not a live "
+            "opening. “Applied” here means *you applied*, not that you can.", icon="🕗")
+
         saved = st.session_state.setdefault("decisions", {})
         current = saved.get(job["job_id"], {}).get("status", "Undecided")
         choices = ["Undecided", "Applied", "Saved for later", "Not interested"]
@@ -127,7 +139,8 @@ with detail:
             else:
                 saved[job["job_id"]] = {
                     "status": choice, "title": job["title"], "company": job["company"],
-                    "location": job["location_raw"], "score": r["score"], "tier": r["tier"]}
+                    "location": job["location_raw"], "score": r["score"], "tier": r["tier"],
+                    "url": job.get("posting_url"), "expiry": str(job.get("expiry_date"))}
             st.rerun()
         if current != "Undecided":
             st.caption(f"✓ Filed under **{current}** — see *My jobs*.")

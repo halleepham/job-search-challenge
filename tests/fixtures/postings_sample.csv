@@ -1,22 +1,22 @@
-job_id,title,company_name,location,description,formatted_work_type,formatted_experience_level,remote_allowed,normalized_salary,min_salary,max_salary,pay_period,currency,listed_time
-1,Senior Data Engineer,Acme Corp,"Kansas City, MO",Build ETL pipelines in Airflow Requires 5+ years of experience. Bachelor's degree in CS.,Full-time,Mid-Senior level,,130000.0,120000.0,140000.0,YEARLY,USD,1713397508000.0
-2,Software Engineer II,Acme Corp,"Austin, TX",Backend services in Go 2-4 years experience. Master's degree preferred.,Full-time,Entry level,,110000.0,100000.0,120000.0,YEARLY,USD,1713397508000.0
-3,Data Analyst,Beta LLC,Remote,"SQL and Tableau reporting Hybrid schedule, 3 days onsite. High school diploma required.",Full-time,Entry level,1.0,95000.0,,,YEARLY,USD,1713397508000.0
-4,Registered Nurse,Mercy Health,"Kansas City, MO",Provide patient care,Full-time,,,,,,,,1713397508000.0
-5,Warehouse Associate,ShipCo,"Dallas, TX",Pick and pack orders,Part-time,,,,,,,,1713397508000.0
-6,Sales Engineer,TechSales Inc,"Chicago, IL",Technical pre-sales support,Full-time,,,,,,,,1713397508000.0
-7,Mechanical Engineer,BuildCo,"Detroit, MI",Design HVAC systems,Full-time,,,,,,,,1713397508000.0
-8,QA Automation Engineer,Beta LLC,Remote,Selenium test suites,Contract,Associate,1.0,85000.0,,,YEARLY,USD,1713397508000.0
-9,Worship Leader,Grace Church,"Tulsa, OK",Lead Sunday services,Volunteer,,,,,,,,1713397508000.0
-10,Machine Learning Scientist,DeepAI,"Seattle, WA",Train ranking models PhD in Statistics or 8 years experience.,Full-time,Mid-Senior level,,160000.0,150000.0,170000.0,YEARLY,USD,1713397508000.0
-11,senior data engineer,ACME CORP,"kansas city, mo",Duplicate of job 1 with different casing,Full-time,,,,,,,,1713397508000.0
-12,Data Engineer,Acme Corp,"Kansas City,  MO",Whitespace variant company,Full-time,,,,,,,,1713397508000.0
-13,Account Executive,SalesForce Co,"Boston, MA",Close enterprise deals,Full-time,,,,,,,,1713397508000.0
-14,Cloud Infrastructure Architect,Nimbus,"Denver, CO",Terraform and Kubernetes,Full-time,Director,,150000.0,140000.0,160000.0,YEARLY,EUR,1713397508000.0
-15,Construction Project Manager,BuildCo,"Detroit, MI",Manage site schedules,Full-time,,,,,,,,1713397508000.0
-16,Full Stack Developer,Startly,Remote,React and Node 1+ years'. Associate degree in IT.,Full-time,Entry level,1.0,120000.0,,,YEARLY,USD,1713397508000.0
-17,Physical Therapist,Mercy Health,"Springfield, MO",Rehabilitation therapy,Part-time,,,,,,,,1713397508000.0
-18,Security Analyst,SecureNet,"Washington, DC",SOC monitoring,Full-time,Associate,,,,,,,1713397508000.0
-19,Barista,CoffeeCo,"Portland, OR",Prepare beverages,Other,,,,,,,,1713397508000.0
-20,Database Administrator,DataHouse,"Phoenix, AZ",Postgres administration,Temporary,Associate,,70000.0,30.0,40.0,HOURLY,USD,1713397508000.0
-21,Software Engineering Manager,Startly,Remote,Lead the platform team,Full-time,Director,1.0,,,,,,1713397508000.0
+job_id,title,company_name,location,description,formatted_work_type,formatted_experience_level,remote_allowed,normalized_salary,min_salary,max_salary,pay_period,currency,listed_time,expiry,job_posting_url
+1,Senior Data Engineer,Acme Corp,"Kansas City, MO",Build ETL pipelines in Airflow Requires 5+ years of experience. Bachelor's degree in CS.,Full-time,Mid-Senior level,,130000.0,120000.0,140000.0,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/1/
+2,Software Engineer II,Acme Corp,"Austin, TX",Backend services in Go 2-4 years experience. Master's degree preferred.,Full-time,Entry level,,110000.0,100000.0,120000.0,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/2/
+3,Data Analyst,Beta LLC,Remote,"SQL and Tableau reporting Hybrid schedule, 3 days onsite. High school diploma required.",Full-time,Entry level,1.0,95000.0,,,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/3/
+4,Registered Nurse,Mercy Health,"Kansas City, MO",Provide patient care,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/4/
+5,Warehouse Associate,ShipCo,"Dallas, TX",Pick and pack orders,Part-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/5/
+6,Sales Engineer,TechSales Inc,"Chicago, IL",Technical pre-sales support,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/6/
+7,Mechanical Engineer,BuildCo,"Detroit, MI",Design HVAC systems,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/7/
+8,QA Automation Engineer,Beta LLC,Remote,Selenium test suites,Contract,Associate,1.0,85000.0,,,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/8/
+9,Worship Leader,Grace Church,"Tulsa, OK",Lead Sunday services,Volunteer,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/9/
+10,Machine Learning Scientist,DeepAI,"Seattle, WA",Train ranking models PhD in Statistics or 8 years experience.,Full-time,Mid-Senior level,,160000.0,150000.0,170000.0,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/10/
+11,senior data engineer,ACME CORP,"kansas city, mo",Duplicate of job 1 with different casing,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/11/
+12,Data Engineer,Acme Corp,"Kansas City,  MO",Whitespace variant company,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/12/
+13,Account Executive,SalesForce Co,"Boston, MA",Close enterprise deals,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/13/
+14,Cloud Infrastructure Architect,Nimbus,"Denver, CO",Terraform and Kubernetes,Full-time,Director,,150000.0,140000.0,160000.0,YEARLY,EUR,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/14/
+15,Construction Project Manager,BuildCo,"Detroit, MI",Manage site schedules,Full-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/15/
+16,Full Stack Developer,Startly,Remote,React and Node 1+ years'. Associate degree in IT.,Full-time,Entry level,1.0,120000.0,,,YEARLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/16/
+17,Physical Therapist,Mercy Health,"Springfield, MO",Rehabilitation therapy,Part-time,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/17/
+18,Security Analyst,SecureNet,"Washington, DC",SOC monitoring,Full-time,Associate,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/18/
+19,Barista,CoffeeCo,"Portland, OR",Prepare beverages,Other,,,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/19/
+20,Database Administrator,DataHouse,"Phoenix, AZ",Postgres administration,Temporary,Associate,,70000.0,30.0,40.0,HOURLY,USD,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/20/
+21,Software Engineering Manager,Startly,Remote,Lead the platform team,Full-time,Director,1.0,,,,,,1713397508000.0,1715989508000.0,https://www.linkedin.com/jobs/view/21/

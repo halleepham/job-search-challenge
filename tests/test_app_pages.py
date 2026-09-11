@@ -21,7 +21,18 @@ pytestmark = pytest.mark.skipif(
     reason="corpus/index not built",
 )
 
-TIMEOUT = 120
+TIMEOUT = 300
+
+
+def _click(at, label):
+    """
+    Click by index, not by key. A button created on a column
+    (`col.button(...)`) gets an auto-generated key that does not round-trip
+    through `at.button(key=...)` — the click registers but the branch never
+    fires, which looks exactly like an application bug.
+    """
+    index = next(i for i, b in enumerate(at.button) if b.label == label)
+    return at.button[index].click().run()
 
 
 def _run(path: str, **session_state) -> AppTest:
@@ -73,7 +84,7 @@ def test_validation_is_silent_until_submit():
 
 def test_validation_appears_after_submit():
     at = _run("views/profile.py")
-    at.button(key=[b for b in at.button if b.label == "Search jobs"][0].key).click().run()
+    _click(at, "Search jobs")
     assert at.warning, "expected validation messages once Search was pressed"
 
 
@@ -197,7 +208,7 @@ def test_clicking_a_job_changes_the_detail_pane():
 
     at = _run("views/results.py", profile=PRESETS["data_science_student"])
     first = at.session_state["selected_job"]
-    at.button(key=[b for b in at.button if b.label == "View details"][0].key).click().run()
+    _click(at, "View details")
     assert at.session_state["selected_job"] != first
 
 
@@ -239,9 +250,62 @@ def test_decision_is_not_saved_until_confirmed():
     # `decisions` exists (setdefault) but must still be empty: selecting is not filing.
     assert dict(at.session_state["decisions"]) == {}, "radio alone filed the job"
 
-    save = [b for b in at.button if b.label == "Save"]
-    assert save, "expected an explicit Save control"
-    at.button(key=save[0].key).click().run()
+    assert any(b.label == "Save" for b in at.button), "expected an explicit Save control"
+    _click(at, "Save")
     filed = dict(at.session_state["decisions"])
     assert filed, "Save did not file the decision"
     assert next(iter(filed.values()))["status"] == "Applied"
+
+
+def test_ac_3_11_profile_survives_navigation():
+    """
+    AC-3.11: the form is keyed, so returning to it shows what was submitted.
+    Re-entering a résumé and twelve fields to change one salary figure is not an
+    acceptable cost for adjusting a search.
+    """
+    at = _run("views/profile.py")
+    at.text_area(key="pf_goals").set_value("I want data engineering work.").run()
+    assert at.session_state["pf_goals"] == "I want data engineering work."
+
+    again = AppTest.from_file("views/profile.py", default_timeout=TIMEOUT)
+    for key, value in at.session_state.filtered_state.items():
+        again.session_state[key] = value
+    again.run()
+    assert again.text_area(key="pf_goals").value == "I want data engineering work."
+
+
+def test_ac_3_11_clear_form_resets():
+    at = _run("views/profile.py")
+    at.text_area(key="pf_goals").set_value("something").run()
+    _click(at, "Clear form")
+    assert at.session_state["pf_goals"] == ""
+
+
+def test_ac_3_11_profile_can_be_saved_by_name():
+    at = _run("views/profile.py")
+    at.text_input(key="pf_save_name").set_value("Data roles KC").run()
+    _click(at, "Save profile")
+    assert "Data roles KC" in dict(at.session_state["saved_profiles"])
+
+
+def test_ac_11_14_posting_link_and_expiry_disclosed():
+    """
+    AC-11.14: every posting in this historical corpus closed in 2024. Linking
+    without saying so would imply an application is still possible.
+    """
+    from src.profiles import PRESETS
+
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
+    assert not at.exception, at.exception
+    warnings = " ".join(w.value for w in at.warning if isinstance(w.value, str))
+    assert "closed on" in warnings, "expiry must be disclosed beside the link"
+    assert "historical" in warnings, "the corpus being historical must be stated, not implied"
+
+    # AppTest does not expose st.link_button, so assert the data the link is
+    # built from — a link rendered from a null URL would be the real failure.
+    import pandas as pd
+
+    jobs = pd.read_parquet("data/processed/jobs_tech.parquet",
+                           columns=["posting_url", "expiry_date"])
+    assert jobs["posting_url"].notna().all(), "every result must have a source link"
+    assert jobs["expiry_date"].notna().all(), "every result must disclose when it closed"

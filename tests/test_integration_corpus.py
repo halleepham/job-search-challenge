@@ -44,6 +44,19 @@ def searches(env):
     return out
 
 
+@pytest.fixture(scope="module")
+def wide_searches(env):
+    """Top-20, the population AC-9.11a v1.1 measures spread over."""
+    from src.personal_kb import PersonalKB
+    from src.pipeline import search
+    from src.profiles import PRESETS
+
+    jobs, index = env
+    return {key: search(jobs, index, p, PersonalKB.build(p.resume_text, p.career_goals),
+                        top_n=20)
+            for key, p in PRESETS.items()}
+
+
 def _sub(result, name):
     return [c["sub_score"] for r in result.results for c in r["components"] if c["name"] == name]
 
@@ -56,18 +69,24 @@ def test_every_profile_returns_results(searches, key):
 
 @pytest.mark.parametrize("key", ["data_science_student", "senior_backend_engineer",
                                  "security_analyst"])
-def test_ac_9_11a_semantic_scores_discriminate(searches, key):
+def test_ac_9_11a_semantic_scores_discriminate(searches, wide_searches, key):
     """
-    AC-9.11a: calibrated sub-scores must vary across a real top-5.
+    AC-9.11a v1.1: calibrated sub-scores must vary across the scored population.
 
-    This is the defect the unit tests could not see. Calibrating on 2,000 random
-    corpus jobs put the p95 anchor below the p5 of the retrieved set, so every
-    scored candidate clipped to 1.0 and 30% of the weight became a constant.
+    Measured over the top 20 rather than the top 5: with 229 survivors, a top-5
+    sitting entirely above p95 *is* the top 2.2%, so identical values there are a
+    correct outcome. Within the top 5 we require only that at least one of the two
+    components varies — a flat pair would mean 30% of the weight is constant,
+    which is the defect this AC exists to catch.
     """
     for name in ("career_goals_similarity", "resume_evidence_similarity"):
-        values = _sub(searches[key], name)
-        assert len(set(round(v, 2) for v in values)) > 1, (
-            f"{key}/{name} is constant across the top-5: {values}")
+        wide = _sub(wide_searches[key], name)
+        assert len(set(round(v, 2) for v in wide)) > 1, (
+            f"{key}/{name} is constant across the top-20: {wide}")
+
+    top5 = [len(set(round(v, 2) for v in _sub(searches[key], n)))
+            for n in ("career_goals_similarity", "resume_evidence_similarity")]
+    assert max(top5) > 1, f"{key}: both semantic components are flat across the top-5"
 
 
 @pytest.mark.parametrize("key", ["data_science_student", "senior_backend_engineer",

@@ -18,11 +18,14 @@ if not decisions:
         st.switch_page("views/results.py")
     st.stop()
 
-st.caption(f"{len(decisions)} job(s) filed this session. "
-           "Decisions are kept while the app is open.")
+st.caption(f"{len(decisions)} job(s) filed this session. Decisions are kept while the app "
+           "is open. Every posting in this corpus closed in 2024 — these are records of real "
+           "jobs, not live openings.")
 
 frame = pd.DataFrame([{"Status": v["status"], "Job": v["title"], "Company": v["company"],
-                       "Location": v["location"], "Match": v["score"], "job_id": job_id}
+                       "Location": v["location"], "Match": v["score"],
+                       "Closed": v.get("expiry", ""), "URL": v.get("url", ""),
+                       "job_id": job_id}
                       for job_id, v in decisions.items()])
 
 tabs = st.tabs([f"{ICONS[s]} {s} ({(frame.Status == s).sum()})" for s in STATUSES])
@@ -36,7 +39,9 @@ for tab, status in zip(tabs, STATUSES):
             with st.container(border=True):
                 left, score, action = st.columns([5, 1, 1])
                 left.markdown(f"**{row.Job}**")
-                left.caption(f"{row.Company} · {row.Location}")
+                left.caption(f"{row.Company} · {row.Location} · closed {row.Closed}")
+                if row.URL:
+                    left.link_button("View original posting ↗", row.URL)
                 score.metric("Match", row.Match)
                 if action.button("Remove", key=f"rm_{row.job_id}", use_container_width=True):
                     st.session_state["decisions"].pop(row.job_id, None)

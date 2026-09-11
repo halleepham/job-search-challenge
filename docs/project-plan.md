@@ -165,6 +165,8 @@ Normalized job schema:
   "preferred_skills": list[str],      # REQ-2
   "description": str,
   "posted_date": date | None,
+  "expiry_date": date | None,
+  "posting_url": str,
 }
 ```
 
@@ -251,6 +253,12 @@ Normalized job schema:
   These numbers are cited directly in the report and must exist before REQ-9 weights are frozen.
 - **AC-1.9** — The job is idempotent: running it twice over the same raw inputs produces byte-identical
   Parquet row counts and an identical `coverage_stats.json`.
+- **AC-1.11** — `posting_url` is carried through from `job_posting_url` (100% present) and
+  `expiry_date` from `expiry`, so a result can link to its source posting and disclose whether it has
+  closed. Added 2026-09-11: both were dropped from the original schema, which left the "Applied"
+  action with nowhere to go and the UI unable to say that **100% of this corpus expired between
+  April and October 2024** — the postings ran Dec 2023 to Apr 2024. A job-search tool that lets a
+  user click "Applied" on a posting that closed two years ago is lying to them.
 - **AC-1.10** — Every transformation in the job is a pure function over a row or DataFrame with no
   reliance on engine-specific types in its signature. SQL handles the set-oriented work (join,
   filter, dedupe, aggregate); Python pure functions handle per-row parsing (salary, work setting,
@@ -401,6 +409,10 @@ Nothing else shares this page. It is the sole entry point for every input the pi
   is never a dead end. Education is split into *Highest completed* and *Currently studying for*,
   grouped under an Education heading, with years of experience under its own heading rather than
   beside them.
+- **AC-3.11** — **The profile survives navigation.** Returning to the form after a search shows it
+  filled in as submitted, with a **Clear form** control to start over, and the current profile can be
+  saved under a name and re-selected from the preset list. Re-entering a résumé and twelve fields to
+  change one salary figure is not an acceptable cost for adjusting a search.
 - **AC-3.10** — **Résumé skills pre-fill the picker.** On résumé entry the REQ-2 extractor runs over
   the user's own text and adds what it finds to the selection — visible and removable, never applied
   silently. The form previously asked the user to recall skills from memory while their résumé sat in
@@ -782,9 +794,14 @@ semantic split is carried over from the Stage 2 co-design prep unchanged, so the
   no evidence and the component is dropped and renormalized, as with preferred skills (AC-9.4). The chunks producing this score are the same ones surfaced to the
   user as evidence in AC-11.5, so the score and the justification shown to the user cannot disagree.
 - **AC-9.11a** — Calibrated semantic sub-scores must **discriminate within the scored candidate
-  set**, not merely be bounded: across a real top-5, the values may not all be identical. A
-  calibration that maps every candidate to 1.0 has the same practical effect as the raw narrow band
-  it replaced. Asserted by test against the real corpus.
+  set**, not merely be bounded. A calibration that maps every candidate to 1.0 has the same practical
+  effect as the raw narrow band it replaced.
+  **Measured over the top 20, not the top 5 (v1.1, 2026-09-11).** With a small survivor pool a top-5
+  can legitimately sit entirely above p95 — for the security profile, 5 of 229 survivors *is* the
+  top 2.2% — so identical values there are a correct outcome, not a flat calibration. The property
+  that matters is spread across the population the anchors describe, so the assertion is made over
+  the top 20 and additionally requires at least one of the two semantic components to vary within
+  the top 5.
 - **AC-9.11** — Calibration (D8) maps raw cosine through
   `clip((raw - p5) / (p95 - p5), 0, 1)` using the persisted constants from AC-5.5. Scores do **not**
   depend on the composition of the candidate set: adding an unrelated job to the pool changes no other
@@ -889,6 +906,9 @@ A dedicated page rendering the ranked top 5 with full score transparency.
   up/down, which a handful of signals cannot support. This is the user setting weights directly and
   seeing the consequence — explicit control rather than inference, and it costs one re-score of an
   already-filtered set.
+- **AC-11.14** — **Link and expiry disclosure.** Each result links to its original posting and
+  states when it closed. The historical corpus means every posting is expired; the interface says so
+  plainly rather than implying a live application is possible.
 - **AC-11.13** — **Verdict.** Each result carries a one-line verdict naming what to check before
   applying, drawn from that job's own unknowns.
   Amended v1.2 (2026-09-11): the page-level "takeaway" paragraph explaining what an explainable
@@ -1050,6 +1070,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-11 | AC-1.11 (new), AC-11.14 (new), AC-3.11 (new) | Carry `posting_url` and `expiry_date` through ingestion; link each result to its source posting and disclose expiry; profile persists across navigation with Clear and save-as-named | `job_posting_url` is 100% present in the raw data and was dropped from the schema, so the "Applied" action had no destination. Measured: the corpus ran Dec 2023 - Apr 2024 and **100% of it expired by October 2024** — letting a user click "Applied" on a two-year-dead posting is a lie the interface was telling. Separately, the form discarded everything on navigation, so changing one salary figure meant re-entering a résumé and twelve fields |
 | 2026-09-11 | D13 (→v2), AC-5.5 (→v1.2), AC-2.2 (→v1.1), AC-6.8 (→v1.1), REQ-8 (reinstated v2.0), AC-3.10 (new) | Retrieval always runs at measured `k`; calibration anchors on filter survivors; `/` and `*` added to skill boundaries with single-letter terms gated on co-occurrence; generic office tools excluded from the skill floor; cross-encoder reinstated off-by-default and evaluated; résumé skills pre-fill the form | Five problems reported from real use, four reproduced. The common thread is that each was a measurement never taken: `k=200` was a round number (hybrid hits 100% recall at 400); calibration still anchored on the retrieval population after D13 changed what gets scored, zeroing 30% of the weight; `r` matched `P/R` and mangled text because the boundary set came from three test cases; and `excel` satisfying the skill floor was declined on 2026-09-08, then re-opened when it produced exactly the reported symptom |
 | 2026-09-11 | AC-3.2, AC-3.9 (new) (REQ-3 → v1.1) | Display capitalisation for normalized values; job titles derived from the corpus with free text accepted; education split into two clearly-named fields; validation deferred until submit | The form exposed internal normalization ("python, sql, aws") as if it were user-facing text; the title list was 15 strings written by hand, so a real title like "data science engineer" simply did not exist; "Education" beside "Studying for" beside "Years of experience" read as three versions of one question; and warnings fired for fields the user had not reached yet |
 | 2026-09-11 | AC-11.12 (REQ-11 → v1.3) | Decisions require explicit confirmation and now have a destination — a **My jobs** page grouped by status, with removal and CSV export | Selecting a radio filed the job immediately and confirmed it in a caption at the very bottom of the page, where the user would not see it. A stray click should not silently change a decision, and an action with no destination is not an action |
