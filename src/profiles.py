@@ -35,6 +35,26 @@ class UserProfile:
     max_distance_miles: int = 100
 
 
+def profile_key(p: "UserProfile") -> tuple:
+    """
+    A hashable identity for a profile, covering every field that can change a
+    result.
+
+    Needed because Streamlit's `@st.cache_data` **ignores** arguments whose name
+    begins with an underscore - the convention for passing unhashable objects.
+    Caching on `_profile` alone therefore keyed every search to the first profile
+    of the session: changing work settings and re-searching returned the previous
+    results. Anything that reaches a filter or a score component belongs here.
+    """
+    return (
+        p.career_goals, p.resume_text, tuple(sorted(p.skills)), p.years_experience,
+        p.highest_completed_education, p.education_in_progress,
+        tuple(p.preferred_titles), p.preferred_location,
+        tuple(sorted(p.accepted_work_settings)), tuple(sorted(p.accepted_employment_types)),
+        p.min_salary, p.include_unlisted_salary, p.max_distance_miles,
+    )
+
+
 PRESETS: dict[str, UserProfile] = {
     "data_science_student": UserProfile(
         name="Data science master's student",

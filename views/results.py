@@ -38,7 +38,15 @@ def load_engine():
 
 
 @st.cache_data(show_spinner="Finding matches…")
-def run(_profile, weights_key: str):
+def run(_profile, profile_key: tuple, weights_key: str):
+    """
+    `_profile` carries the object; `profile_key` carries its identity.
+
+    Streamlit ignores underscore-prefixed arguments when building a cache key, so
+    caching on `_profile` alone pinned every search to the first profile of the
+    session — editing work settings and re-searching silently returned the old
+    results.
+    """
     from src.personal_kb import PersonalKB
     from src.pipeline import search
 
@@ -50,7 +58,9 @@ def run(_profile, weights_key: str):
 overrides = st.session_state.get("weight_overrides")
 if overrides:
     WEIGHTS.update(overrides)
-result = run(profile, str(sorted((overrides or {}).items())))
+from src.profiles import profile_key
+
+result = run(profile, profile_key(profile), str(sorted((overrides or {}).items())))
 
 bar_l, bar_r = st.columns([3, 1])
 bar_l.title("Matches")

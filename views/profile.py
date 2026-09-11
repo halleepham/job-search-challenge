@@ -201,9 +201,13 @@ with want:
                                    help="Only about 30% of postings state a salary.")
 
     physical = bool({"Hybrid", "On-site"} & work_settings)
-    max_distance = st.slider("Maximum commute (miles)", 10, 250, key="pf_distance",
-                             disabled=not (location and physical),
-                             help="Applies to on-site and hybrid roles. Remote ignores distance.")
+    anchor = location or "your location"
+    max_distance = st.slider(f"Show jobs within ___ miles of {anchor}", 10, 250,
+                             key="pf_distance", disabled=not (location and physical),
+                             help="Straight-line distance between the centre of your city and the "
+                                  "centre of the job's city — not driving time, and not measured "
+                                  "from the city edge. Applies to on-site and hybrid roles only; "
+                                  "remote jobs ignore it entirely.")
 
 st.divider()
 

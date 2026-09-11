@@ -156,3 +156,55 @@ def test_d13_exact_path_cannot_lose_a_scored_job(index, profile, kb):
     kept, _ = apply_filters(JOBS, profile)
     out = search(JOBS, index, profile, kb, top_n=99)
     assert len(out.results) == len(kept)
+
+
+def test_profile_key_changes_with_every_result_affecting_field():
+    """
+    Regression: `@st.cache_data` ignores underscore-prefixed arguments, so
+    caching the search on `_profile` alone pinned results to the first profile of
+    the session — changing work settings and re-searching returned the old list.
+    Every field that can change a result must change this key.
+    """
+    from dataclasses import replace
+
+    from src.profiles import PRESETS, profile_key
+
+    base = PRESETS["data_science_student"]
+    variants = {
+        "work settings": replace(base, accepted_work_settings={"On-site"}),
+        "employment types": replace(base, accepted_employment_types={"Internship"}),
+        "salary": replace(base, min_salary=base.min_salary + 5000),
+        "skills": replace(base, skills=base.skills | {"cobol"}),
+        "location": replace(base, preferred_location="Austin, TX"),
+        "titles": replace(base, preferred_titles=["security analyst"]),
+        "distance": replace(base, max_distance_miles=25),
+        "unlisted salary": replace(base, include_unlisted_salary=False),
+        "years": replace(base, years_experience=9.0),
+        "education": replace(base, highest_completed_education=5),
+        "goals": replace(base, career_goals="something else entirely"),
+        "résumé": replace(base, resume_text="different text"),
+    }
+    for label, variant in variants.items():
+        assert profile_key(variant) != profile_key(base), f"{label} did not change the key"
+
+
+def test_profile_key_is_stable_and_hashable():
+    from dataclasses import replace
+
+    from src.profiles import PRESETS, profile_key
+
+    p = PRESETS["data_science_student"]
+    assert profile_key(p) == profile_key(replace(p))
+    assert hash(profile_key(p))
+
+
+def test_changing_work_setting_changes_the_results(index, profile, kb):
+    """The end-to-end version of the same bug."""
+    from dataclasses import replace
+
+    from src.pipeline import search
+
+    remote_ok = search(JOBS, index, profile, kb)
+    onsite_only = search(JOBS, index, replace(profile, accepted_work_settings={"On-site"}), kb)
+    assert [r["job_id"] for r in remote_ok.results] != [r["job_id"] for r in onsite_only.results]
+    assert all(r["job"]["work_setting"] == "On-site" for r in onsite_only.results)
