@@ -785,7 +785,7 @@ document, as Stage 2 practice rather than as shipped code.
 
 ## REQ-11: Results page
 
-**Status:** FROZEN v1.1 (2026-09-09)
+**Status:** FROZEN v1.2 (2026-09-11)
 **Traces to:** report §8 (final application), §1 (expected outputs)
 **Tests:** manual; screenshots are the deliverable
 
@@ -810,9 +810,9 @@ A dedicated page rendering the ranked top 5 with full score transparency.
   or generates résumé text. A skill with no retrieved chunk above the similarity floor is shown as
   matched-without-evidence rather than given an invented justification.
 - **AC-11.6** — A score-distribution chart across the returned results is shown.
-- **AC-11.8** — **Job & Candidate panel.** Each result shows the job's facts and the user's facts
-  side by side — the comparison the score is *about*. Previously only the job was shown, which asked
-  the reader to hold the profile in their head.
+- **AC-11.8** — **Job & Candidate comparison.** Each result shows the job's facts and the user's
+  facts side by side — the comparison the score is *about*. Previously only the job was shown, which
+  asked the reader to hold their own profile in their head.
 - **AC-11.9** — **Evidence table.** Retrieved evidence renders as a typed table with **Type /
   Evidence / Source** columns rather than loose quotes: résumé sections carry their section name and
   document, job requirements carry "Job description", profile fields carry "Profile". Every résumé
@@ -832,9 +832,13 @@ A dedicated page rendering the ranked top 5 with full score transparency.
   up/down, which a handful of signals cannot support. This is the user setting weights directly and
   seeing the consequence — explicit control rather than inference, and it costs one re-score of an
   already-filtered set.
-- **AC-11.13** — **Verdict and takeaway.** Each card carries a one-line verdict naming what to check
-  before applying (drawn from that job's unknowns), and the page closes with a takeaway stating what
-  an explainable match is for.
+- **AC-11.13** — **Verdict.** Each result carries a one-line verdict naming what to check before
+  applying, drawn from that job's own unknowns.
+  Amended v1.2 (2026-09-11): the page-level "takeaway" paragraph explaining what an explainable
+  match is *for* was removed. The application is a job-search tool someone uses, not a demonstration
+  of its own method — that explanation belongs in the report, where it is assessed. The per-result
+  verdict stays, because it tells the user something actionable about *this* job rather than about
+  the system.
 - **AC-11.7** — Every field collected on the profile page is either used by a filter or a score
   component, or is not collected. No field is stored and then ignored — the exact defect in the Stage 2
   AI code, where `education_level` and `min_salary` sat unused on `UserProfile`.
@@ -990,6 +994,7 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-11 | AC-11.13, REQ-11 §layout (REQ-11 → v1.2) | Results restructured to a job-board **list + detail** pattern; the standalone landing page was folded into the search form; the page-level "takeaway" paragraph was removed | The stacked-card layout made scanning impossible — comparing two results meant scrolling past two full breakdowns, and the sidebar consumed a large share of the viewport. Job boards separate scanning from reading for a reason, so the list carries what you scan by and the detail pane carries what you read. The takeaway paragraph explained the system to its own user: this is an application someone uses, not a demonstration of its method, and that explanation belongs in the report where it is assessed |
 | 2026-09-09 | AC-11.8 - AC-11.13 (REQ-11 → v1.1) | Added Job & Candidate panel, typed evidence table, component bars with points/max, a Gaps **& unknowns** table, a human-decision panel with explicit weight adjustment, and verdict/takeaway lines | Course guidance specified the components an explainable-match UI should carry. Audit found roughly half present: score, breakdown, evidence and missing skills existed; the candidate side, evidence typing, unknowns, and any decision affordance did not. The **unknowns** gap was the substantive one — the pipeline already records `salary_listed`, `work_setting_inferred`, `min_years_exp_source` and absent `education_required`, and a score computed partly from neutral defaults must disclose that or it implies unearned confidence. The weight control is explicit user adjustment, not the learned feedback loop cut in Non-Goals |
 | 2026-09-09 | D13 (new), pipeline | Retrieval skipped when filter survivors ≤ 2,500; every eligible job scored exactly | AC-13.1 v1.1's recall metric showed retrieval at k=200 recovering only 45-95% of the true top-20 by score — the approximate stage was discarding what the exact stage wanted. Scoring all survivors costs ~220 ms more and gave an identical top-5 on all three profiles. Retrieval retained above the threshold as the scalability path |
 | 2026-09-09 | AC-13.1 (REQ-13 → v1.1) | Primary retrieval metric changed from precision@10 against a title-family proxy to **recall of the top-scoring set**; proxy and pooled judgment retained as secondary | The proxy returned precision@10 = 1.00 for both BM25 and hybrid on all three profiles — it could not separate the methods, which is a limitation of the metric rather than evidence about the methods. Recall-of-top-scored needs no human labels, is not circular (retrieval and scoring use different signals), and answers whether hybrid earns its cost |

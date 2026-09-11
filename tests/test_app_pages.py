@@ -31,27 +31,23 @@ def _run(path: str, **session_state) -> AppTest:
     return at.run()
 
 
-def test_home_renders():
+def test_search_page_renders():
+    """app.py IS the search form - there is no separate landing page."""
     at = _run("app.py")
     assert not at.exception, at.exception
-    assert at.title[0].value == "Job Search & Matching"
+    assert at.title[0].value == "Find your next job"
 
 
-def test_profile_page_renders():
-    at = _run("pages/1_Profile.py")
-    assert not at.exception, at.exception
-
-
-def test_ac_3_1_profile_page_shows_no_results():
-    """AC-3.1: the profile page is standalone — no scores or job cards on it."""
-    at = _run("pages/1_Profile.py")
+def test_ac_3_1_search_page_shows_no_results():
+    """AC-3.1: the search page is standalone — no scores or job cards on it."""
+    at = _run("app.py")
     text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
-    assert "Why this score" not in text
+    assert "Why this match" not in text and "Match" not in text
 
 
 def test_ac_3_2_every_specified_control_exists():
     """AC-3.2: the widgets REQ-3 §page structure specifies are all present."""
-    at = _run("pages/1_Profile.py")
+    at = _run("app.py")
     assert at.text_area, "career goals / résumé paste"
     assert at.multiselect, "skills and preferred titles"
     assert at.number_input, "years of experience and minimum salary"
@@ -61,7 +57,7 @@ def test_ac_3_2_every_specified_control_exists():
 
 
 def test_ac_3_3_work_and_employment_are_checkbox_sets():
-    at = _run("pages/1_Profile.py")
+    at = _run("app.py")
     labels = {c.label for c in at.checkbox}
     assert {"Remote", "Hybrid", "On-site"} <= labels
     assert {"Full-time", "Contract", "Part-time", "Temporary", "Internship"} <= labels
@@ -69,18 +65,18 @@ def test_ac_3_3_work_and_employment_are_checkbox_sets():
 
 def test_ac_3_4_validation_blocks_an_empty_form():
     """With no résumé and no goals the submit button must be disabled."""
-    at = _run("pages/1_Profile.py")
+    at = _run("app.py")
     assert at.warning, "expected validation warnings on an empty custom profile"
     assert at.button[0].disabled
 
 
-def test_analytics_page_renders():
-    at = _run("pages/3_Analytics.py")
+def test_insights_page_renders():
+    at = _run("pages/2_Insights.py")
     assert not at.exception, at.exception
 
 
 def test_results_page_without_profile_is_graceful():
-    at = _run("pages/2_Results.py")
+    at = _run("pages/1_Results.py")
     assert not at.exception, at.exception
     assert at.info, "expected a prompt to build a profile first"
 
@@ -88,7 +84,7 @@ def test_results_page_without_profile_is_graceful():
 def test_results_page_renders_a_real_search():
     from src.profiles import PRESETS
 
-    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
     assert not at.exception, at.exception
     assert at.metric, "expected the AC-11.2 funnel metrics"
 
@@ -117,12 +113,11 @@ def test_ac_11_8_to_11_13_panels_render():
     """REQ-11 v1.1: the explainable-match panels the course guidance specifies."""
     from src.profiles import PRESETS
 
-    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
     assert not at.exception, at.exception
 
     text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
-    assert "**Job & you**" in text, "AC-11.8 job/candidate panel"
-    assert "Overall match" in text, "AC-11.10 component bars"
+    assert "**This job**" in text and "**You**" in text, "AC-11.8 job/candidate comparison"
     assert any(w in text for w in ("candidate.", "candidate,")), "AC-11.13 verdict"
 
     # AC-11.9 / AC-11.11 now live in per-job sub-tabs rather than inline headings.
@@ -133,35 +128,51 @@ def test_ac_11_8_to_11_13_panels_render():
     # which also proves AC-11.3, that the points shown total the displayed score.
     captions = " ".join(c.value for c in at.caption if isinstance(c.value, str))
     assert "Points total" in captions, "AC-11.10 component bars"
-    assert "Takeaway" in captions, "AC-11.13 takeaway"
-    assert any("Decision" == r.label for r in at.radio), "AC-11.12 decision control"
+    assert any("Your decision" == r.label for r in at.radio), "AC-11.12 decision control"
 
 
-def test_results_page_uses_one_tab_per_job():
+def test_ac_11_13_v1_2_no_methodology_takeaway():
     """
-    Five full breakdowns stacked vertically made comparing two jobs a scrolling
-    exercise, which is the thing a match list exists for. One tab per job.
+    AC-11.13 v1.2: the app does not explain itself to its own user. The
+    per-result verdict stays (it is about the job); the page-level essay on what
+    an explainable match is *for* belongs in the report.
     """
     from src.profiles import PRESETS
 
-    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    everything = " ".join(
+        str(x.value) for group in (at.caption, at.markdown, at.info) for x in group
+        if isinstance(getattr(x, "value", None), str))
+    assert "Takeaway" not in everything
+
+
+def test_results_is_a_list_plus_detail():
+    """
+    The job-board pattern: a scannable list of results, and a detail pane for the
+    one you clicked. Every listed job needs a way to open it.
+    """
+    from src.profiles import PRESETS
+
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    view_buttons = [b for b in at.button if b.label == "View details"]
+    assert view_buttons, "list rows must be openable"
     labels = [getattr(t, "label", "") for t in at.tabs]
-    job_tabs = [x for x in labels if x[:1].isdigit()]
-    assert len(job_tabs) == 5, f"expected 5 job tabs, got {job_tabs}"
+    assert "Job description" in labels, "detail pane leads with the posting itself"
+    assert "Why this match" in labels, "…and explains the score behind a click"
 
 
-def test_results_summary_table_shows_all_five_at_once():
-    """The at-a-glance table must not require scrolling through cards."""
+def test_clicking_a_job_changes_the_detail_pane():
     from src.profiles import PRESETS
 
-    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
-    assert at.dataframe, "expected a summary table"
-    assert len(at.dataframe[0].value) == 5
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    first = at.session_state["selected_job"]
+    at.button(key=[b for b in at.button if b.label == "View details"][0].key).click().run()
+    assert at.session_state["selected_job"] != first
 
 
 def test_ac_11_12_weight_sliders_present():
     from src.profiles import PRESETS
 
-    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
     from src.scoring import WEIGHTS
     assert len(at.slider) == len(WEIGHTS), "one slider per score component"

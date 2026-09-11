@@ -10,9 +10,9 @@ import streamlit as st
 
 from src.analytics import CORPUS_LABEL
 
-st.set_page_config(page_title="Analytics", page_icon="📊", layout="wide",
+st.set_page_config(page_title="Job market insights", page_icon="📊", layout="wide",
                    initial_sidebar_state="collapsed")
-st.title("What is in the job corpus")
+st.title("Job market insights")
 st.caption(f"**Corpus:** {CORPUS_LABEL}")
 
 DIR = Path("data/processed/analytics")
