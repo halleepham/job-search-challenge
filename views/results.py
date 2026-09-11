@@ -1,5 +1,5 @@
 """
-Results — a job list beside a detail pane, the pattern job boards use.
+Matches — a job list beside a detail pane, the pattern job boards use.
 
 The list shows what you scan by (title, company, location, salary, match); the
 detail pane shows everything about the job you clicked, including how its match
@@ -14,14 +14,11 @@ import streamlit as st
 from src.explain import component_bars, evidence_table, gaps_and_unknowns, verdict
 from src.scoring import WEIGHTS
 
-st.set_page_config(page_title="Job matches", page_icon="🧭", layout="wide",
-                   initial_sidebar_state="collapsed")
-
 if "profile" not in st.session_state:
-    st.title("Job matches")
-    st.info("Start a search first.")
-    if st.button("Go to search"):
-        st.switch_page("app.py")
+    st.title("Matches")
+    st.info("Build a profile first.")
+    if st.button("Go to Profile"):
+        st.switch_page("views/profile.py")
     st.stop()
 
 profile = st.session_state["profile"]
@@ -56,11 +53,11 @@ if overrides:
 result = run(profile, str(sorted((overrides or {}).items())))
 
 bar_l, bar_r = st.columns([3, 1])
-bar_l.title("Job matches")
+bar_l.title("Matches")
 bar_l.caption(f"{result.funnel['skill_floor']:,} jobs met your requirements · "
               f"showing the {len(result.results)} best")
-if bar_r.button("← New search", use_container_width=True):
-    st.switch_page("app.py")
+if bar_r.button("Edit profile", use_container_width=True):
+    st.switch_page("views/profile.py")
 
 if not result.results:
     st.error(result.funnel.get("suggestion", "No jobs matched your requirements."))
@@ -114,8 +111,26 @@ with detail:
         s.metric("Match", r["score"])
         s.caption(f"{TIER_ICON[r['tier']]} {r['tier']}")
         st.markdown(f"**{headline}.** {advice}")
-        st.radio("Your decision", ["Undecided", "Apply", "Save for later", "Not interested"],
-                 key=f"decision_{job['job_id']}", horizontal=True)
+
+        saved = st.session_state.setdefault("decisions", {})
+        current = saved.get(job["job_id"], {}).get("status", "Undecided")
+        choices = ["Undecided", "Applied", "Saved for later", "Not interested"]
+        d1, d2 = st.columns([3, 1])
+        choice = d1.radio("Your decision", choices, index=choices.index(current),
+                          key=f"decision_{job['job_id']}", horizontal=True)
+        # Selecting a radio changes nothing until it is confirmed - a stray click
+        # should not silently file a job.
+        if d2.button("Save", key=f"save_{job['job_id']}", use_container_width=True,
+                     disabled=choice == current):
+            if choice == "Undecided":
+                saved.pop(job["job_id"], None)
+            else:
+                saved[job["job_id"]] = {
+                    "status": choice, "title": job["title"], "company": job["company"],
+                    "location": job["location_raw"], "score": r["score"], "tier": r["tier"]}
+            st.rerun()
+        if current != "Undecided":
+            st.caption(f"✓ Filed under **{current}** — see *My jobs*.")
 
     overview, why, evidence, gaps_tab = st.tabs(
         ["Job description", "Why this match", "Evidence", f"Gaps & unknowns ({len(gaps)})"])
@@ -181,7 +196,3 @@ with st.expander("Adjust what matters to you"):
         del st.session_state["weight_overrides"]
         st.rerun()
 
-decisions = {k.removeprefix("decision_"): v for k, v in st.session_state.items()
-             if k.startswith("decision_") and v != "Undecided"}
-if decisions:
-    st.success("**Saved:** " + " · ".join(f"{v} (job {k})" for k, v in decisions.items()))

@@ -31,23 +31,22 @@ def _run(path: str, **session_state) -> AppTest:
     return at.run()
 
 
-def test_search_page_renders():
-    """app.py IS the search form - there is no separate landing page."""
-    at = _run("app.py")
+def test_profile_page_renders():
+    at = _run("views/profile.py")
     assert not at.exception, at.exception
-    assert at.title[0].value == "Find your next job"
+    assert at.title[0].value == "Profile"
 
 
 def test_ac_3_1_search_page_shows_no_results():
     """AC-3.1: the search page is standalone — no scores or job cards on it."""
-    at = _run("app.py")
+    at = _run("views/profile.py")
     text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
     assert "Why this match" not in text and "Match" not in text
 
 
 def test_ac_3_2_every_specified_control_exists():
     """AC-3.2: the widgets REQ-3 §page structure specifies are all present."""
-    at = _run("app.py")
+    at = _run("views/profile.py")
     assert at.text_area, "career goals / résumé paste"
     assert at.multiselect, "skills and preferred titles"
     assert at.number_input, "years of experience and minimum salary"
@@ -57,26 +56,53 @@ def test_ac_3_2_every_specified_control_exists():
 
 
 def test_ac_3_3_work_and_employment_are_checkbox_sets():
-    at = _run("app.py")
+    at = _run("views/profile.py")
     labels = {c.label for c in at.checkbox}
     assert {"Remote", "Hybrid", "On-site"} <= labels
     assert {"Full-time", "Contract", "Part-time", "Temporary", "Internship"} <= labels
 
 
-def test_ac_3_4_validation_blocks_an_empty_form():
-    """With no résumé and no goals the submit button must be disabled."""
-    at = _run("app.py")
-    assert at.warning, "expected validation warnings on an empty custom profile"
-    assert at.button[0].disabled
+def test_validation_is_silent_until_submit():
+    """
+    Warnings about fields you have not reached yet are noise. Nothing is
+    reported until the user actually presses Search.
+    """
+    at = _run("views/profile.py")
+    assert not at.warning, "form warned before the user submitted anything"
+
+
+def test_validation_appears_after_submit():
+    at = _run("views/profile.py")
+    at.button(key=[b for b in at.button if b.label == "Search jobs"][0].key).click().run()
+    assert at.warning, "expected validation messages once Search was pressed"
+
+
+def test_job_titles_come_from_the_corpus_not_a_hardcoded_list():
+    """
+    The original list was 15 titles written by hand, so "data science engineer"
+    simply did not exist. Options now come from the corpus, and free text is
+    accepted alongside for anything it lacks.
+    """
+    from views.profile import title_choices
+
+    choices = title_choices()
+    assert len(choices) > 100, "expected corpus-derived titles, not a short hand-written list"
+    assert any(c[0].isupper() for c in choices), "titles must display capitalised"
+
+
+def test_form_controls_display_capitalised():
+    at = _run("views/profile.py")
+    skills = next(m for m in at.multiselect if m.label == "Your skills")
+    assert any(o[0].isupper() for o in skills.options), "skills must display capitalised"
 
 
 def test_insights_page_renders():
-    at = _run("pages/2_Insights.py")
+    at = _run("views/insights.py")
     assert not at.exception, at.exception
 
 
 def test_results_page_without_profile_is_graceful():
-    at = _run("pages/1_Results.py")
+    at = _run("views/results.py")
     assert not at.exception, at.exception
     assert at.info, "expected a prompt to build a profile first"
 
@@ -84,7 +110,7 @@ def test_results_page_without_profile_is_graceful():
 def test_results_page_renders_a_real_search():
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     assert not at.exception, at.exception
     assert at.metric, "expected the AC-11.2 funnel metrics"
 
@@ -113,7 +139,7 @@ def test_ac_11_8_to_11_13_panels_render():
     """REQ-11 v1.1: the explainable-match panels the course guidance specifies."""
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     assert not at.exception, at.exception
 
     text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
@@ -139,7 +165,7 @@ def test_ac_11_13_v1_2_no_methodology_takeaway():
     """
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     everything = " ".join(
         str(x.value) for group in (at.caption, at.markdown, at.info) for x in group
         if isinstance(getattr(x, "value", None), str))
@@ -153,7 +179,7 @@ def test_results_is_a_list_plus_detail():
     """
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     view_buttons = [b for b in at.button if b.label == "View details"]
     assert view_buttons, "list rows must be openable"
     labels = [getattr(t, "label", "") for t in at.tabs]
@@ -164,7 +190,7 @@ def test_results_is_a_list_plus_detail():
 def test_clicking_a_job_changes_the_detail_pane():
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     first = at.session_state["selected_job"]
     at.button(key=[b for b in at.button if b.label == "View details"][0].key).click().run()
     assert at.session_state["selected_job"] != first
@@ -173,6 +199,44 @@ def test_clicking_a_job_changes_the_detail_pane():
 def test_ac_11_12_weight_sliders_present():
     from src.profiles import PRESETS
 
-    at = _run("pages/1_Results.py", profile=PRESETS["data_science_student"])
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
     from src.scoring import WEIGHTS
     assert len(at.slider) == len(WEIGHTS), "one slider per score component"
+
+
+def test_my_jobs_empty_state():
+    at = _run("views/my_jobs.py")
+    assert not at.exception, at.exception
+    assert at.info, "expected a prompt when nothing is filed"
+
+
+def test_my_jobs_lists_filed_decisions():
+    at = _run("views/my_jobs.py", decisions={
+        101: {"status": "Applied", "title": "Data Engineer", "company": "Acme",
+              "location": "Kansas City, MO", "score": 74, "tier": "Good"},
+        102: {"status": "Saved for later", "title": "Data Analyst", "company": "Beta",
+              "location": "Remote", "score": 61, "tier": "Good"}})
+    assert not at.exception, at.exception
+    text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
+    assert "Data Engineer" in text and "Data Analyst" in text
+
+
+def test_decision_is_not_saved_until_confirmed():
+    """
+    Selecting a radio must not file the job — a stray click should not silently
+    change what the user has decided.
+    """
+    from src.profiles import PRESETS
+
+    at = _run("views/results.py", profile=PRESETS["data_science_student"])
+    radio = next(r for r in at.radio if r.label == "Your decision")
+    at.radio(key=radio.key).set_value("Applied").run()
+    # `decisions` exists (setdefault) but must still be empty: selecting is not filing.
+    assert dict(at.session_state["decisions"]) == {}, "radio alone filed the job"
+
+    save = [b for b in at.button if b.label == "Save"]
+    assert save, "expected an explicit Save control"
+    at.button(key=save[0].key).click().run()
+    filed = dict(at.session_state["decisions"])
+    assert filed, "Save did not file the decision"
+    assert next(iter(filed.values()))["status"] == "Applied"

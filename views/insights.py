@@ -10,8 +10,6 @@ import streamlit as st
 
 from src.analytics import CORPUS_LABEL
 
-st.set_page_config(page_title="Job market insights", page_icon="📊", layout="wide",
-                   initial_sidebar_state="collapsed")
 st.title("Job market insights")
 st.caption(f"**Corpus:** {CORPUS_LABEL}")
 

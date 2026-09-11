@@ -330,7 +330,7 @@ is buying almost nothing and REQ-9 should be revised through the spec-change pro
 
 ## REQ-3: Profile input page
 
-**Status:** FROZEN v1.0 (2026-09-09)
+**Status:** FROZEN v1.1 (2026-09-11)
 **Traces to:** report §1 (user inputs), §8 (final application)
 **Tests:** `tests/test_req3_profile.py` (validation logic only; widget rendering is not unit-tested)
 
@@ -387,7 +387,17 @@ Nothing else shares this page. It is the sole entry point for every input the pi
 - **AC-3.1** — The profile page is a standalone page. No results, scores, or dataset analytics render
   on it.
 - **AC-3.2** — Every field in the tables above exists with the specified widget type, default, and
-  required/optional status.
+  required/optional status. **Presentation rules (v1.1, 2026-09-11):** values stored in normalized
+  lowercase (skills, job titles) are **displayed capitalised** and mapped back on selection —
+  normalization is a matching concern and must not leak into the form. Job-title options are derived
+  from the corpus (the 300 most common normalized titles), **not a hand-written list**, and both
+  skills and titles accept free text alongside the options, so a value the vocabulary happens to lack
+  is never a dead end. Education is split into *Highest completed* and *Currently studying for*,
+  grouped under an Education heading, with years of experience under its own heading rather than
+  beside them.
+- **AC-3.9** — **Validation is silent until submit.** Nothing is reported while the user is still
+  filling the form; messages appear only after Search is pressed, naming the fields that block it.
+  Warning about a field the user has not reached yet is noise, not help.
 - **AC-3.3** — Work setting and employment type are **sets**, not single values. Selecting Remote and
   Hybrid together is valid and produces `accepted_work_settings = {"Remote", "Hybrid"}`.
 - **AC-3.4** — Validation blocks submission and shows a specific message when: no résumé is supplied
@@ -785,7 +795,7 @@ document, as Stage 2 practice rather than as shipped code.
 
 ## REQ-11: Results page
 
-**Status:** FROZEN v1.2 (2026-09-11)
+**Status:** FROZEN v1.3 (2026-09-11)
 **Traces to:** report §8 (final application), §1 (expected outputs)
 **Tests:** manual; screenshots are the deliverable
 
@@ -826,8 +836,12 @@ A dedicated page rendering the ranked top 5 with full score transparency.
   `salary_listed`, `work_setting_inferred`, `min_years_exp_source`, absent `education_required`.
   Surfacing them is the point: a score computed partly from neutral defaults must say so, or it
   implies a confidence the data does not support.
-- **AC-11.12** — **Human decision panel.** Per-result actions (apply / save / dismiss), plus an
-  explicit weight-adjustment control that re-scores the same candidate set and re-ranks.
+- **AC-11.12** — **Human decision panel.** Per-result actions (applied / saved for later / not
+  interested) that take effect **only when explicitly confirmed** — selecting a radio must not file
+  anything, since a stray click should not silently change what the user decided — plus an explicit
+  weight-adjustment control that re-scores the same candidate set and re-ranks.
+  Filed decisions are listed on their own **My jobs** page, grouped by status, removable, and
+  exportable as CSV. An action with no destination is not an action (v1.3, 2026-09-11).
   This is **not** the feedback loop cut in Non-Goals: that was *learning* weights from thumbs
   up/down, which a handful of signals cannot support. This is the user setting weights directly and
   seeing the consequence — explicit control rather than inference, and it costs one re-score of an
@@ -994,6 +1008,9 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 
 | Date | REQ/AC changed | What changed | Why |
 |---|---|---|---|
+| 2026-09-11 | AC-3.2, AC-3.9 (new) (REQ-3 → v1.1) | Display capitalisation for normalized values; job titles derived from the corpus with free text accepted; education split into two clearly-named fields; validation deferred until submit | The form exposed internal normalization ("python, sql, aws") as if it were user-facing text; the title list was 15 strings written by hand, so a real title like "data science engineer" simply did not exist; "Education" beside "Studying for" beside "Years of experience" read as three versions of one question; and warnings fired for fields the user had not reached yet |
+| 2026-09-11 | AC-11.12 (REQ-11 → v1.3) | Decisions require explicit confirmation and now have a destination — a **My jobs** page grouped by status, with removal and CSV export | Selecting a radio filed the job immediately and confirmed it in a caption at the very bottom of the page, where the user would not see it. A stray click should not silently change a decision, and an action with no destination is not an action |
+| 2026-09-11 | REQ-11 §layout, app structure | Sidebar navigation replaced with a top navigation bar carrying the product name ("Job Matcher") on every page; pages are Profile · Matches · My jobs · Insights | The sidebar consumed a large share of the viewport and the product had no persistent identity. Implemented with `st.navigation(position="hidden")` plus `st.page_link`, so routing stays declarative |
 | 2026-09-11 | AC-11.13, REQ-11 §layout (REQ-11 → v1.2) | Results restructured to a job-board **list + detail** pattern; the standalone landing page was folded into the search form; the page-level "takeaway" paragraph was removed | The stacked-card layout made scanning impossible — comparing two results meant scrolling past two full breakdowns, and the sidebar consumed a large share of the viewport. Job boards separate scanning from reading for a reason, so the list carries what you scan by and the detail pane carries what you read. The takeaway paragraph explained the system to its own user: this is an application someone uses, not a demonstration of its method, and that explanation belongs in the report where it is assessed |
 | 2026-09-09 | AC-11.8 - AC-11.13 (REQ-11 → v1.1) | Added Job & Candidate panel, typed evidence table, component bars with points/max, a Gaps **& unknowns** table, a human-decision panel with explicit weight adjustment, and verdict/takeaway lines | Course guidance specified the components an explainable-match UI should carry. Audit found roughly half present: score, breakdown, evidence and missing skills existed; the candidate side, evidence typing, unknowns, and any decision affordance did not. The **unknowns** gap was the substantive one — the pipeline already records `salary_listed`, `work_setting_inferred`, `min_years_exp_source` and absent `education_required`, and a score computed partly from neutral defaults must disclose that or it implies unearned confidence. The weight control is explicit user adjustment, not the learned feedback loop cut in Non-Goals |
 | 2026-09-09 | D13 (new), pipeline | Retrieval skipped when filter survivors ≤ 2,500; every eligible job scored exactly | AC-13.1 v1.1's recall metric showed retrieval at k=200 recovering only 45-95% of the true top-20 by score — the approximate stage was discarding what the exact stage wanted. Scoring all survivors costs ~220 ms more and gave an identical top-5 on all three profiles. Retrieval retained above the threshold as the scalability path |
