@@ -18,9 +18,7 @@ Profile  →  FILTER  →  RETRIEVE  →  SCORE  →  RANK  →  matches with ev
 ```
 
 **Filters eliminate; scores rank.** A job paying below your floor disappears entirely — it cannot
-compensate with a strong skill match. A job thirty miles away simply scores slightly lower. Treating
-non-negotiables as weights is the mistake this design exists to avoid: an 8% salary weight still lets
-an underpaying job rank first.
+compensate with a strong skill match. A job thirty miles away simply scores slightly lower.
 
 Every result shows the job beside your profile, a points breakdown that **sums exactly to the score**,
 the résumé lines supporting each matched skill, and — unusually — the **unknowns**: facts the posting
@@ -121,9 +119,9 @@ skill within 40 characters, because `"P/R organization"` and `"mission r equirem
 evidence of anything.
 
 ### 3 · Hard filters
-Location (geocoded offline, distance-decayed), salary, work setting, employment type, and at least one
-shared non-generic skill. **Sharing Microsoft Word with a posting is not evidence of fit**, so office
-tools cannot be the sole reason a job is considered.
+Location (geocoded offline via `geonamescache`, distance-decayed), salary, work setting, employment
+type, and at least one shared non-generic skill — generic office tools cannot be the sole reason a
+job is considered.
 
 ### 4 · Hybrid retrieval
 **BM25** over the full posting text and **dense embeddings** (`all-MiniLM-L6-v2`) over title plus
@@ -155,10 +153,13 @@ The **Insights** page reports the corpus itself: top skills and their co-occurre
 geography, salary by role family, work setting and experience requirements.
 
 Top requested skills are `excel` (3,455), `python` (3,140), `sql` (2,997), `agile` (2,697),
-`word` (2,289), `aws` (2,092) — and the most common skill pairs are `excel+word` and
-`excel+powerpoint`. That is not noise to crop out of the chart: it is what a corpus of IT,
-engineering, analytics, QA and science job functions actually contains. Roughly a quarter is strictly
-software/data work, and the interface says so rather than calling itself a "tech jobs" dataset.
+`word` (2,289), `aws` (2,092); the most common skill pairs are `excel+word` and `excel+powerpoint`.
+That reflects what a corpus of IT, engineering, analytics, QA and science job functions actually
+contains — roughly a quarter is strictly software/data work, and the interface labels it that way
+rather than calling itself a "tech jobs" dataset.
+
+Geographic distribution is led by CA (1,858), TX (1,771), VA (753), NY (728) and IL (675). Work
+setting splits 11,443 on-site · 4,207 remote · 2,811 hybrid.
 
 ---
 
@@ -186,26 +187,6 @@ returns in **0.02 s**, about 40M rows/sec. This is the evidence behind choosing 
 **Component sensitivity** — zeroing each component and counting how many top-5 results change, across
 all three profiles: required skills 3.33 · experience 1.33 · education 0.67 · career goals 0.67 ·
 title 0.67 · résumé evidence 0.67 · location 0.33 · preferred skills 0.00.
-
----
-
-## Human vs. AI vs. Human-AI
-
-| Aspect | Human design | AI design | Human-AI co-design |
-|---|---|---|---|
-| Problem model | Attributes vs. constraints | One-directional, no eligibility gating | Both directions; multi-select constraints |
-| Architecture | Assumed clean form inputs | 24 KB hand-written JSON, scored every row | Ingestion → Parquet → dual index → filter-first |
-| Data processing | Not addressed | Not addressed | 123,849 rows, 7 normalisation rules, measured coverage |
-| Analytics | Skill overlap + embeddings (planned) | TF-IDF fitted on 2 documents | Hybrid BM25 + dense, calibrated |
-| Retrieval | Filter then rank | Soft scoring only | Filter → hybrid retrieve → score |
-| Scalability | Not addressed | Not addressed | Filter-first, cached indexes, 786k scale test |
-| Code quality | N/A (paper design) | 7 verified defects | 537 AC-derived tests |
-
-Seven defects in the AI-generated code were verified against its source and each is now prevented by
-a tested acceptance criterion — substring skill matching, TF-IDF on a two-document corpus, a
-`sim * 140.0` rescaling constant, empty preferred-skills scoring a perfect 1.0, skills counted twice,
-profile fields collected but never read, and templated text presented as explanation. Reproduce any
-with `git show agent-exercise:src/matcher.py`.
 
 ---
 
