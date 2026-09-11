@@ -16,7 +16,8 @@ import streamlit as st
 
 CORPUS = Path("data/processed/jobs_tech.parquet")
 
-st.set_page_config(page_title="Job Search & Matching", page_icon="🧭", layout="wide")
+st.set_page_config(page_title="Job Search & Matching", page_icon="🧭", layout="wide",
+                   initial_sidebar_state="collapsed")
 
 
 @st.cache_resource(show_spinner="Loading corpus and indexes…")

@@ -121,17 +121,42 @@ def test_ac_11_8_to_11_13_panels_render():
     assert not at.exception, at.exception
 
     text = " ".join(m.value for m in at.markdown if isinstance(m.value, str))
-    assert "**Job**" in text and "**You**" in text, "AC-11.8 job/candidate panel"
-    assert "Evidence retrieved" in text, "AC-11.9 evidence table"
+    assert "**Job & you**" in text, "AC-11.8 job/candidate panel"
     assert "Overall match" in text, "AC-11.10 component bars"
-    assert "Gaps & unknowns" in text or "No gaps" in text, "AC-11.11"
     assert any(w in text for w in ("candidate.", "candidate,")), "AC-11.13 verdict"
+
+    # AC-11.9 / AC-11.11 now live in per-job sub-tabs rather than inline headings.
+    tab_labels = {label for group in at.tabs for label in [getattr(group, "label", "")]}
+    assert any("Evidence" in t for t in tab_labels), "AC-11.9 evidence tab"
+    assert any("Gaps & unknowns" in t for t in tab_labels), "AC-11.11 gaps tab"
     # AppTest does not expose st.progress, so assert on the caption the bars emit —
     # which also proves AC-11.3, that the points shown total the displayed score.
     captions = " ".join(c.value for c in at.caption if isinstance(c.value, str))
     assert "Points total" in captions, "AC-11.10 component bars"
+    assert "Takeaway" in captions, "AC-11.13 takeaway"
     assert any("Decision" == r.label for r in at.radio), "AC-11.12 decision control"
-    assert any("Takeaway" in i.value for i in at.info), "AC-11.13 takeaway"
+
+
+def test_results_page_uses_one_tab_per_job():
+    """
+    Five full breakdowns stacked vertically made comparing two jobs a scrolling
+    exercise, which is the thing a match list exists for. One tab per job.
+    """
+    from src.profiles import PRESETS
+
+    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    labels = [getattr(t, "label", "") for t in at.tabs]
+    job_tabs = [x for x in labels if x[:1].isdigit()]
+    assert len(job_tabs) == 5, f"expected 5 job tabs, got {job_tabs}"
+
+
+def test_results_summary_table_shows_all_five_at_once():
+    """The at-a-glance table must not require scrolling through cards."""
+    from src.profiles import PRESETS
+
+    at = _run("pages/2_Results.py", profile=PRESETS["data_science_student"])
+    assert at.dataframe, "expected a summary table"
+    assert len(at.dataframe[0].value) == 5
 
 
 def test_ac_11_12_weight_sliders_present():
