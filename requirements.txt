@@ -25,6 +25,7 @@ pypdf==5.0.1
 # --- Application & visualization (REQ-3, REQ-11, REQ-12) ---
 streamlit==1.39.0
 plotly==5.24.1
+kaleido==0.2.1           # plotly static image export for the notebook's figures
 
 # --- Testing & notebooks (REQ-13) ---
 pytest==8.3.3

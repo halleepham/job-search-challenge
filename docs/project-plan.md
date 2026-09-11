@@ -1013,7 +1013,7 @@ compliance*.
 
 ## REQ-14: Reproducibility and documentation
 
-**Status:** FROZEN v1.0 (2026-09-09)
+**Status:** FROZEN v1.0 (2026-09-09) — IMPLEMENTED (README written; AC-14.6 screenshots outstanding)
 **Traces to:** report §11 (GitHub and Reproducibility), §10 (comparison table)
 
 **Acceptance Criteria:**

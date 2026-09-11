@@ -35,7 +35,10 @@ PACKAGES = [
 ]
 
 MODELS = [
-    ("sentence-transformers/all-MiniLM-L6-v2", "AC-4.3 embeddings"),
+    ("sentence-transformers/all-MiniLM-L6-v2", "AC-4.3 embeddings", True),
+    # REQ-8 ships disabled, so its model is optional - but cache_models.py fetches
+    # it, and the evaluation notebook's four-way comparison needs it.
+    ("cross-encoder/ms-marco-MiniLM-L-6-v2", "AC-8.1 reranker (optional, off by default)", False),
 ]
 
 results: list[tuple[str, str, str]] = []
@@ -90,11 +93,11 @@ def main() -> None:
         check(FAIL, "data_jobs (HF)", "run: python -m src.download_data_jobs")
 
     print("\n--- models (cached locally, no network needed at runtime) ---")
-    for repo, why in MODELS:
+    for repo, why, required in MODELS:
         if hf_cached(repo):
             check(OK, repo, why)
         else:
-            check(FAIL, repo, f"NOT CACHED - {why}")
+            check(FAIL if required else WARN, repo, f"not cached - {why}")
 
     fails = [r for r in results if r[0] == FAIL]
     warns = [r for r in results if r[0] == WARN]

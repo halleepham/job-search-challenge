@@ -1,26 +1,26 @@
 skill,n
-excel,3498
-python,3252
-sql,3111
-agile,2875
-word,2313
-aws,2165
-azure,2057
-java,1881
-javascript,1543
-go,1500
-windows,1475
-rest api,1374
-powerpoint,1335
-ci/cd,1282
-linux,1197
-oracle,1192
-artificial intelligence,1069
-machine learning,1038
-outlook,1013
-c,1001
-c++,1000
-flow,1000
-c#,923
-sap,914
-google cloud,887
+excel,3455
+python,3140
+sql,2997
+agile,2697
+word,2289
+aws,2092
+azure,1996
+java,1782
+go,1471
+javascript,1447
+windows,1432
+powerpoint,1315
+rest api,1303
+ci/cd,1253
+oracle,1156
+linux,1036
+outlook,996
+flow,974
+artificial intelligence,926
+machine learning,904
+sap,896
+c#,860
+google cloud,832
+jira,832
+git,812

@@ -1,41 +1,41 @@
 skill_a,skill_b,n
-excel,word,1911
-excel,powerpoint,1204
-python,sql,1028
-powerpoint,word,1028
-aws,azure,927
-excel,outlook,848
-outlook,word,783
-aws,python,668
-agile,scrum,658
-java,python,622
-html,javascript,615
-agile,java,606
-aws,ci/cd,584
-c++,python,574
-aws,google cloud,567
-artificial intelligence,machine learning,565
-agile,ci/cd,552
-agile,aws,551
-aws,java,538
-azure,google cloud,529
-machine learning,python,525
-agile,azure,523
-javascript,python,496
-azure,ci/cd,465
-azure,python,462
-java,javascript,460
-agile,javascript,458
-javascript,sql,445
-c#,javascript,440
-agile,jira,439
-agile,sql,430
-ci/cd,java,421
-css,html,418
+excel,word,1888
+excel,powerpoint,1185
+powerpoint,word,1013
+python,sql,998
+aws,azure,869
+excel,outlook,838
+outlook,word,776
+aws,python,646
+java,python,607
+html,javascript,564
+aws,ci/cd,551
+aws,google cloud,539
+agile,java,532
+agile,scrum,514
+azure,google cloud,505
+javascript,python,493
+agile,aws,492
+aws,java,492
+c++,python,491
+agile,ci/cd,489
+machine learning,python,489
+agile,azure,465
+azure,python,447
+azure,ci/cd,442
+javascript,sql,428
+java,javascript,423
 azure,sql,418
-c#,sql,417
-css,javascript,414
-agile,python,411
-oracle,sql,403
-excel,sql,403
-outlook,powerpoint,391
+c#,javascript,413
+artificial intelligence,machine learning,409
+agile,sql,401
+agile,jira,399
+agile,javascript,397
+c#,sql,393
+outlook,powerpoint,388
+agile,python,385
+docker,kubernetes,384
+ci/cd,java,383
+excel,sql,383
+css,javascript,367
+aws,kubernetes,366
