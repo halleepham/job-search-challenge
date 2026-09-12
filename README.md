@@ -28,6 +28,13 @@ never stated, where the score fell back to a neutral default.
 
 ## Quick start
 
+> **Requires Python 3.10, 3.11, or 3.12.** This project was built and tested on 3.10. **Python 3.13
+> will not work out of the box** — several pinned packages (pandas included) predate 3.13's release
+> and have no pre-built wheel for it, so `pip install` tries to compile them from source and fails
+> with a Meson/C-compiler error unless you have Visual Studio's build tools installed. Check your
+> version with `python --version` before creating the virtual environment, and install 3.11 or 3.12
+> from [python.org](https://www.python.org/downloads/) if needed — it can coexist with 3.13.
+
 **macOS / Linux:**
 
 ```bash
@@ -40,7 +47,7 @@ pip install -r requirements.txt
 
 ```powershell
 git clone <repo-url>; cd job-search-challenge
-python -m venv .venv
+py -3.11 -m venv .venv          # -3.11 picks that version even if 3.13 is your default
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```

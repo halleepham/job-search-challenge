@@ -1,5 +1,10 @@
 # CS 5542 Challenge 1 — Job Search & Matching Application
-# Python 3.10 · no JVM required (DuckDB runs in-process)
+# Requires Python 3.10, 3.11, or 3.12. NOT 3.13 — several pins below predate 3.13's
+# release and have no prebuilt wheel for it, so pip falls back to compiling from
+# source and fails without a C/C++ toolchain (this bit a Windows install with a
+# fresh 3.13 default: pandas 2.2.3 tried to build via Meson and needed
+# vswhere.exe / Visual Studio build tools that weren't present).
+# No JVM required (DuckDB runs in-process).
 #
 # NOTE (AC-14.2): after the first successful install, regenerate exact pins with
 #   pip freeze > requirements.lock.txt
