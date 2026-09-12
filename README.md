@@ -28,34 +28,77 @@ never stated, where the score fell back to a neutral default.
 
 ## Quick start
 
+**macOS / Linux:**
+
 ```bash
 git clone <repo-url> && cd job-search-challenge
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# 1. get the data (see Credentials below)
+**Windows (PowerShell):**
+
+```powershell
+git clone <repo-url>; cd job-search-challenge
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+> If PowerShell blocks activation with an execution-policy error, run
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first — this only affects the current
+> terminal session. Using Command Prompt instead of PowerShell? Activate with
+> `.venv\Scripts\activate.bat`.
+
+### Credentials
+
+Set this up **before** the steps below — the data-download step depends on it. Only one credential is
+needed, and it is free. Create a Kaggle API token (kaggle.com → Settings → API → Create New Token),
+then:
+
+**macOS / Linux:**
+
+```bash
+mkdir -p ~/.kaggle && echo "<your-token>" > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+```
+
+**Windows (PowerShell):**
+
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.kaggle" | Out-Null
+"<your-token>" | Out-File -FilePath "$env:USERPROFILE\.kaggle\access_token" -Encoding ascii -NoNewline
+```
+
+> `chmod` has no Windows equivalent and isn't needed there — NTFS permissions on your user profile
+> folder already keep the file private to your account.
+
+**No other keys.** No LLM API, no paid services, nothing to configure at runtime.
+
+### Build and run
+
+```bash
+# 1. get the data — REQUIRED. The app checks for the corpus file at startup
+#    and will not run without it.
 python -m src.download_data          # LinkedIn postings  → data/raw/
-python -m src.download_data_jobs     # data_jobs corpus   → HF cache
-python -m src.cache_models           # embedding model    → ~180 MB, one time
 
-# 2. build the corpus (~40 s)
+# 2. build the corpus (~40 s) — REQUIRED for the same reason.
 python -m src.ingest                 # → data/processed/jobs_tech.parquet
 
 # 3. run
 streamlit run app.py
 ```
 
+Two more scripts exist but are **not required** to run the app:
+
+- `python -m src.download_data_jobs` — only needed to regenerate the skill vocabulary from scratch.
+  The vocabulary it produces (`data/vocabulary/skills_vocabulary.json`) is already committed, so this
+  step is skipped by default.
+- `python -m src.cache_models` — pre-downloads the sentence-embedding model (~180 MB) so the first
+  `ingest` run doesn't pause to fetch it. Skipping this just means that download happens automatically
+  the first time it's needed, during step 2 above, instead of ahead of time.
+
 `python -m src.preflight` verifies packages, credentials, datasets and models in one command and
 names anything missing.
-
-### Credentials
-
-Only one, and it is free. Create a Kaggle API token (kaggle.com → Settings → API → Create New Token),
-then:
-
-```bash
-mkdir -p ~/.kaggle && echo "<your-token>" > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
-```
 
 > **Note on the Kaggle client.** `src/download_data.py` uses **`kagglehub`**, not the `kaggle` CLI. As
 > of `kaggle==1.7.4.5` — the newest published version — the CLI accepts only legacy `username`+`key`
