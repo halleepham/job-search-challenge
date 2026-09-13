@@ -23,7 +23,7 @@ the REQ they implement. No code is written against a section still marked DRAFT.
 ### 0.1 What the system does
 
 A job seeker enters a profile — career documents plus structured preferences — and receives the
-top 5 matching job postings from a corpus of real tech job listings, each with a 0-100 match score,
+top 10 matching job postings from a corpus of real tech job listings, each with a 0-100 match score,
 a decomposed breakdown of how that score was produced, the matched and missing skills, and a
 grounded natural-language explanation of why the job sits at its rank.
 
@@ -92,7 +92,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
   (3) SCORE          8-component weighted score, calibrated semantics  [D8]
          │
          ▼
-  (4) RANK → top 5 ─→ (5) EVIDENCE  retrieve supporting résumé chunks per job  [D11]
+  (4) RANK → top 10 ─→ (5) EVIDENCE  retrieve supporting résumé chunks per job  [D11]
                               │
                               ▼
                      Results page (REQ-11) · Analytics page (REQ-12)
@@ -862,16 +862,16 @@ document, as Stage 2 practice rather than as shipped code.
 
 ## REQ-11: Results page
 
-**Status:** FROZEN v1.3 (2026-09-11)
+**Status:** FROZEN v1.4 (2026-09-12)
 **Traces to:** report §8 (final application), §1 (expected outputs)
 **Tests:** manual; screenshots are the deliverable
 
 **Description:**
-A dedicated page rendering the ranked top 5 with full score transparency.
+A dedicated page rendering the ranked top 10 with full score transparency.
 
 **Acceptance Criteria:**
 
-- **AC-11.1** — Top 5 jobs render as cards showing title, company, location, salary range (or an
+- **AC-11.1** — Top 10 jobs render as cards showing title, company, location, salary range (or an
   "unlisted" badge), employment type, work setting (with an "inferred" badge where applicable), the
   0-100 match score, and the tier badge.
 - **AC-11.2** — A funnel summary shows corpus size → survivors after each filter → candidates retrieved
@@ -1109,3 +1109,4 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 | 2026-09-08 | D9, AC-1.10, AC-12.1, AC-13.4, Q3 | Processing engine changed from PySpark to DuckDB for offline ingestion and analytics; PySpark demoted to an optional engine-comparison in AC-13.4 | The corpus fits single-machine, so Spark added real setup cost (JDK 17 vs. the installed JDK 24, ~300MB package, JVM startup per run) for no performance gain. Report §5 lists SQL among acceptable technologies and grades the *justification*, not the tool. Measuring the crossover is a stronger result than asserting the choice. REQ-1 was still DRAFT |
 | 2026-09-08 | AC-1.4 | Salary normalization now prefers the dataset's existing `normalized_salary` column, with the pay_period derivation as fallback; added per-path row counts to coverage stats | User confirmed `postings.csv` carries `normalized_salary`. Reimplementing normalization the dataset already did would be wasted work and a worse veracity story than reporting how much was pre-normalized. REQ-1 was still DRAFT, so this is an amendment, not a post-freeze change |
 | 2026-09-08 | — | Initial draft | Written from the review of `docs/context/job-matching-application-plan.md` against `human-design.md` and `human-ai-codesign-prep.md`; decisions D1-D12 settled in discussion |
+| 2026-09-12 | AC-11.1, REQ-11 description, overview (REQ-11 → v1.4) | Results page returns the top **10**, not the top 5 | The application has shipped `top_n=10` since the list+detail redesign (v1.2) — a list view makes ten scannable where five stacked cards did not — but the spec was never amended to match, so REQ-11 described behaviour the code did not have. Corrected in favour of the code: ten is the better default for the shipped layout. `TOP_N = 5` remains the library default used by the evaluation notebook and REQ-13 tests, which measure the top 5 deliberately. |

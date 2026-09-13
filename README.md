@@ -9,6 +9,18 @@ to a stated rule** and every quoted line comes verbatim from the user's own rés
 
 ---
 
+## Contents
+
+- [What it does](#what-it-does)
+- [Project structure](#project-structure)
+- [Quick start](#quick-start) · [Credentials](#credentials) · [Build and run](#build-and-run)
+- [Dataset](#dataset)
+- [Pipeline](#pipeline)
+- [Analytics](#analytics)
+- [Results](#results)
+- [Repository](#repository)
+- [Limitations](#limitations)
+
 ## What it does
 
 ```
@@ -26,6 +38,47 @@ never stated, where the score fell back to a neutral default.
 
 ---
 
+## Project structure
+
+```
+job-search-challenge/
+├── app.py                      router and top navigation bar
+├── views/                      one file per page of the interface
+│   ├── profile.py                the profile form — all user input
+│   ├── results.py                ranked matches, list + detail pane
+│   ├── my_jobs.py                applied / saved / not interested
+│   └── insights.py               corpus-level analytics charts
+├── src/                        all pipeline and matching logic
+│   ├── ingest.py                 raw CSVs → cleaned corpus (DuckDB)
+│   ├── skills.py                 skill extraction from description text
+│   ├── filters.py                hard filters — eliminate ineligible jobs
+│   ├── indexing.py               builds and caches the BM25 + embedding indexes
+│   ├── retrieval.py              BM25, embedding, and hybrid retrieval
+│   ├── scoring.py                the 8 weighted score components
+│   ├── explain.py                score breakdown, evidence, gaps
+│   └── pipeline.py               ties filter → retrieve → score → rank together
+├── tests/                      537 tests, one file per requirement area
+├── notebooks/
+│   ├── evaluation.ipynb          method comparison, latency, scalability
+│   ├── figures/                  charts used in the report
+│   └── results/                  measurement tables behind those charts
+├── docs/
+│   └── project-plan.md           the specification — every REQ and AC
+├── data/
+│   ├── raw/                      downloaded LinkedIn CSVs (gitignored)
+│   ├── processed/                cleaned corpus + coverage stats
+│   ├── vocabulary/               the 372-term skill vocabulary
+│   └── index/                    cached search indexes (gitignored)
+├── requirements.txt
+└── README.md
+```
+
+The project is **specification-driven**: every behaviour is a numbered requirement (`REQ-n`) with
+testable acceptance criteria (`AC-n.m`), tests cite the AC they verify, and commits reference the
+requirement they implement. When implementation contradicted a frozen requirement, the specification
+was amended first with the reason recorded — `docs/project-plan.md` ends with a changelog of every
+such change.
+
 ## Quick start
 
 > **Requires Python 3.10, 3.11, or 3.12.** This project was built and tested on 3.10. **Python 3.13
@@ -38,19 +91,24 @@ never stated, where the score fell back to a neutral default.
 **macOS / Linux:**
 
 ```bash
-git clone <repo-url> && cd job-search-challenge
-python3 -m venv .venv && source .venv/bin/activate
+git clone <repo-url>
+cd job-search-challenge
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 **Windows (PowerShell):**
 
 ```powershell
-git clone <repo-url>; cd job-search-challenge
-py -3.11 -m venv .venv          # -3.11 picks that version even if 3.13 is your default
+git clone <repo-url>
+cd job-search-challenge
+py -3.11 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
+
+`py -3.11` selects that interpreter even when a newer Python is your default.
 
 > If PowerShell blocks activation with an execution-policy error, run
 > `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first — this only affects the current
@@ -66,7 +124,9 @@ then:
 **macOS / Linux:**
 
 ```bash
-mkdir -p ~/.kaggle && echo "<your-token>" > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+mkdir -p ~/.kaggle
+echo "<your-token>" > ~/.kaggle/access_token
+chmod 600 ~/.kaggle/access_token
 ```
 
 **Windows (PowerShell):**
@@ -75,9 +135,6 @@ mkdir -p ~/.kaggle && echo "<your-token>" > ~/.kaggle/access_token && chmod 600 
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.kaggle" | Out-Null
 "<your-token>" | Out-File -FilePath "$env:USERPROFILE\.kaggle\access_token" -Encoding ascii -NoNewline
 ```
-
-> `chmod` has no Windows equivalent and isn't needed there — NTFS permissions on your user profile
-> folder already keep the file private to your account.
 
 **No other keys.** No LLM API, no paid services, nothing to configure at runtime.
 
@@ -112,15 +169,13 @@ names anything missing.
 > credentials, while Kaggle's site now issues a single API token. Verified by grepping the installed
 > package: zero references to `access_token`.
 
-**No other keys.** No LLM API, no paid services, nothing to configure at runtime.
-
 ---
 
 ## Dataset
 
 | | |
 |---|---|
-| **Source** | [LinkedIn Job Postings 2023-2024](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) — 123,849 postings, 31 columns, 11 CSVs (~517 MB uncompressed) |
+| **Source** | [LinkedIn Job Postings 2023-2024](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) — 123,849 postings, 31 columns, 11 CSVs (~493 MB uncompressed) |
 | **Secondary** | [`lukebarousse/data_jobs`](https://huggingface.co/datasets/lukebarousse/data_jobs) — 785,741 rows; seeds the skill vocabulary and provides the scalability test |
 | **Storage** | Parquet (columnar, compressed, dtype-preserving) |
 | **Raw data** | Not committed. Regenerated from the commands above |
@@ -258,28 +313,15 @@ git show agent-exercise:src/matcher.py       # the AI's matching engine
 git diff main agent-exercise -- src/         # what changed between stages
 ```
 
-### Layout
-
-```
-app.py                  router and top navigation
-views/                  profile · results · my jobs · insights
-src/                    ingest · skills · filters · retrieval · scoring · explain · evaluation
-tests/                  537 tests, one file per requirement area
-notebooks/              evaluation.ipynb, figures/, results/
-docs/project-plan.md    the specification: numbered requirements and acceptance criteria
-data/                   raw (gitignored) · processed · vocabulary · index (gitignored)
-```
-
-The project is **specification-driven**: every behaviour is a numbered requirement (`REQ-n`) with
-testable acceptance criteria (`AC-n.m`), tests cite the AC they verify, and commits reference the
-requirement they implement. When implementation contradicted a frozen requirement, the specification
-was amended first with the reason recorded — `docs/project-plan.md` ends with a changelog of every
-such change.
+### Verifying the project
 
 ```bash
-pytest tests/ -q          # 537 tests
-python -m src.preflight   # environment check
+pytest tests/ -q
+python -m src.preflight
 ```
+
+`pytest` runs all 537 acceptance-criteria tests; `preflight` checks packages, credentials, datasets
+and models and names anything missing.
 
 ---
 
