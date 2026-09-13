@@ -8,7 +8,15 @@ top-left on every page, the way a website behaves.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+if sys.platform == "win32":
+    # Windows only: torch is imported lazily at first search, by which point pyarrow
+    # and numpy have loaded their own OpenMP runtime, and torch's c10.dll then fails
+    # to initialise (WinError 1114). Importing it first avoids the clash. Left off
+    # other platforms so a page that never embeds anything does not pay ~250 MB.
+    import torch  # noqa: F401
 
 import streamlit as st
 

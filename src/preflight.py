@@ -25,7 +25,6 @@ PACKAGES = [
     ("kagglehub", "dataset download"),
     ("datasets", "data_jobs (REQ-2 seed, REQ-13 scale test)"),
     ("sentence_transformers", "REQ-4/5 embeddings, REQ-8 reranker"),
-    ("faiss", "REQ-5 vector index"),
     ("rank_bm25", "REQ-7 keyword retrieval"),
     ("geonamescache", "REQ-6 geocoding, REQ-3 location validation"),
     ("pypdf", "REQ-3 resume parsing"),

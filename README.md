@@ -12,6 +12,7 @@ to a stated rule** and every quoted line comes verbatim from the user's own rés
 ## Contents
 
 - [What it does](#what-it-does)
+- [Screenshots](#screenshots)
 - [Project structure](#project-structure)
 - [Quick start](#quick-start) · [Credentials](#credentials) · [Build and run](#build-and-run)
 - [Dataset](#dataset)
@@ -37,6 +38,18 @@ the résumé lines supporting each matched skill, and — unusually — the **un
 never stated, where the score fell back to a neutral default.
 
 ---
+
+## Screenshots
+
+| | |
+|---|---|
+| **Profile** — résumé, skills, and constraints ([top](docs/screenshots/profile-top.png) · [bottom](docs/screenshots/profile-bottom.png)) | ![Profile](docs/screenshots/profile-top.png) |
+| **Matches** — ranked list beside a detail pane | ![Matches](docs/screenshots/matches-list.png) |
+| **Why this job** — matched and missing skills | ![Skills](docs/screenshots/matches-skill-comparison.png) |
+| **Evidence** — résumé lines quoted verbatim, never generated | ![Evidence](docs/screenshots/matches-evidence.png) |
+| **Gaps & unknowns** — what you lack, and what the posting never said | ![Gaps](docs/screenshots/matches-gaps-unknowns.png) |
+| **My jobs** — applied, saved, not interested | ![My jobs](docs/screenshots/my-jobs.png) |
+| **Insights** — what the corpus itself contains | ![Insights](docs/screenshots/insights.png) |
 
 ## Project structure
 
@@ -175,16 +188,18 @@ names anything missing.
 
 | | |
 |---|---|
-| **Source** | [LinkedIn Job Postings 2023-2024](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) — 123,849 postings, 31 columns, 11 CSVs (~493 MB uncompressed) |
+| **Source** | [LinkedIn Job Postings 2023-2024](https://www.kaggle.com/datasets/arshkon/linkedin-job-postings) — 123,849 postings, 31 columns, 11 CSVs (~531 MB uncompressed) |
 | **Secondary** | [`lukebarousse/data_jobs`](https://huggingface.co/datasets/lukebarousse/data_jobs) — 785,741 rows; seeds the skill vocabulary and provides the scalability test |
 | **Storage** | Parquet (columnar, compressed, dtype-preserving) |
 | **Raw data** | Not committed. Regenerated from the commands above |
 
 ### ⚠️ These postings have expired
 
-The corpus runs **December 2023 – April 2024**, expiring April–October 2024. **100% of it is closed
-today.** The application links to each original posting and states the date it closed rather than
-implying an application is still possible. This is a record of a real job market, not a live one.
+The postings were collected in a **two-week window in April 2024** (original listing dates, for
+postings that were re-listed, reach back to December 2023). Their stated expiry dates run April–
+October 2024, so **100% of the corpus is closed today.** The application links to each original
+posting and states the date it closed rather than implying an application is still possible. This is
+a record of a real job market, not a live one.
 
 ### Ingestion funnel
 
@@ -217,8 +232,8 @@ fits single-machine, so Spark's JVM startup and shuffle overhead would be cost w
 crossover is documented rather than asserted — see Results.
 
 ### 2 · Skill extraction
-A **372-term vocabulary** (252 seeded from `data_jobs`, 121 hand-added for mobile, .NET, design,
-security and testing) matched by **word-boundary regex — never substring**. "Java" must not match
+A **372-term vocabulary** (252 seeded from `data_jobs`, the rest added by hand for mobile, .NET,
+design, security and testing) matched by **word-boundary regex — never substring**. "Java" must not match
 "JavaScript"; "Go" must not match "MongoDB". Single-letter skills like `R` require another recognised
 skill within 40 characters, because `"P/R organization"` and `"mission r equirements"` are not
 evidence of anything.
@@ -285,7 +300,7 @@ while BM25 alone needs k=1400. That measurement sets the production `k`.
 
 **Latency** — 556 ms median, 576 ms p95 (filter 62 · retrieve 365 · score 128 · evidence 0.6).
 
-**Scalability** — ingestion throughput *rises* with corpus size (7.1k → 37.6k rows/sec) as fixed
+**Scalability** — ingestion throughput *rises* with corpus size (6.9k → 36.7k rows/sec) as fixed
 startup cost amortises. On the 785,741-row `data_jobs` corpus a `GROUP BY` with a median aggregate
 returns in **0.02 s**, about 40M rows/sec. This is the evidence behind choosing DuckDB.
 

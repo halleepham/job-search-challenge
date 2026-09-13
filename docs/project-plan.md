@@ -73,7 +73,7 @@ reverse the draft plan or the Stage 1 human design, and the report (Section 4) m
 
                                  INDEX BUILD (run once, cached)
                                  ──────────────────────────────
-                       jobs_tech.parquet ─→ dense embeddings (.npy + FAISS)
+                       jobs_tech.parquet ─→ dense embeddings (.npy)
                                           ─→ BM25 index
                                           ─→ calibration.json (p5/p95, D8)
 
@@ -109,7 +109,7 @@ data/
 │   └── analytics/*.csv      # committed — small aggregation outputs for the report
 ├── vocabulary/
 │   └── skills_vocabulary.json   # committed — curated gazetteer (REQ-2)
-└── index/                   # gitignored — FAISS index, BM25 pickle, calibration.json
+└── index/                   # gitignored — embeddings .npy, BM25 pickle, calibration.json
 ```
 
 Parquet is the processed format: columnar, compressed, preserves dtypes, and is the natural
@@ -496,7 +496,7 @@ index is needed on this side.
 
 ## REQ-5: Job corpus indexing and calibration
 
-**Status:** FROZEN v1.2 (2026-09-11) — IMPLEMENTED
+**Status:** FROZEN v1.3 (2026-09-12) — IMPLEMENTED
 **Traces to:** report §5 (storage, indexing), §6 (embeddings, BM25)
 **Tests:** `tests/test_req5_indexing.py`
 
@@ -505,7 +505,7 @@ Build and persist the dense vector index, the BM25 index, and the semantic calib
 All three are computed once and cached; recomputing on app start would make the application unusable.
 
 **Inputs:** `data/processed/jobs_tech.parquet`.
-**Outputs / Behavior:** `data/index/{embeddings.npy, faiss.index, bm25.pkl, calibration.json, manifest.json}`.
+**Outputs / Behavior:** `data/index/{embeddings.npy, bm25.pkl, calibration.json, manifest.json}`.
 
 **Acceptance Criteria:**
 
@@ -1110,3 +1110,4 @@ Explicitly out of scope for v1.0. The report's limitations section cites this li
 | 2026-09-08 | AC-1.4 | Salary normalization now prefers the dataset's existing `normalized_salary` column, with the pay_period derivation as fallback; added per-path row counts to coverage stats | User confirmed `postings.csv` carries `normalized_salary`. Reimplementing normalization the dataset already did would be wasted work and a worse veracity story than reporting how much was pre-normalized. REQ-1 was still DRAFT, so this is an amendment, not a post-freeze change |
 | 2026-09-08 | — | Initial draft | Written from the review of `docs/context/job-matching-application-plan.md` against `human-design.md` and `human-ai-codesign-prep.md`; decisions D1-D12 settled in discussion |
 | 2026-09-12 | AC-11.1, REQ-11 description, overview (REQ-11 → v1.4) | Results page returns the top **10**, not the top 5 | The application has shipped `top_n=10` since the list+detail redesign (v1.2) — a list view makes ten scannable where five stacked cards did not — but the spec was never amended to match, so REQ-11 described behaviour the code did not have. Corrected in favour of the code: ten is the better default for the shipped layout. `TOP_N = 5` remains the library default used by the evaluation notebook and REQ-13 tests, which measure the top 5 deliberately. |
+| 2026-09-12 | REQ-5 outputs, architecture diagram (REQ-5 → v1.3) | Dropped `faiss.index` from the stated outputs and removed `faiss-cpu` from the dependencies | The file was never written and the library was never imported: dense retrieval is an exact NumPy matrix product over 18,461 vectors (`retrieval.py:_dense_ranked`), which returns in milliseconds. An approximate index trades exactness for speed at a scale this corpus never reaches — the same measure-first argument as D9 (DuckDB over Spark). The spec had described an artefact the code did not produce, and every install was pulling ~30 MB for an unused import. |
