@@ -1,0 +1,41 @@
+skill_a,skill_b,n
+excel,word,1888
+excel,powerpoint,1185
+powerpoint,word,1013
+python,sql,998
+aws,azure,869
+excel,outlook,838
+outlook,word,776
+aws,python,646
+java,python,607
+html,javascript,564
+aws,ci/cd,551
+aws,google cloud,539
+agile,java,532
+agile,scrum,514
+azure,google cloud,505
+javascript,python,493
+agile,aws,492
+aws,java,492
+c++,python,491
+agile,ci/cd,489
+machine learning,python,489
+agile,azure,465
+azure,python,447
+azure,ci/cd,442
+javascript,sql,428
+java,javascript,423
+azure,sql,418
+c#,javascript,413
+artificial intelligence,machine learning,409
+agile,sql,401
+agile,jira,399
+agile,javascript,397
+c#,sql,393
+outlook,powerpoint,388
+agile,python,385
+docker,kubernetes,384
+ci/cd,java,383
+excel,sql,383
+css,javascript,367
+aws,kubernetes,366

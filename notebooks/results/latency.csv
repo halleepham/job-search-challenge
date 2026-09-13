@@ -1,0 +1,7 @@
+stage,median_ms,p95_ms
+filter,61.8,75.7
+retrieve,364.7,372.2
+score,127.5,134.7
+rank,0.3,0.4
+evidence,0.6,0.9
+total,556.4,575.5

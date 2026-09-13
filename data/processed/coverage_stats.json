@@ -1,0 +1,51 @@
+{
+  "funnel": {
+    "raw_load": 123849,
+    "after_tech_scoping": 33597,
+    "after_dedupe": 31782,
+    "after_employment_filter": 31659,
+    "after_zero_skill_drop": 18461
+  },
+  "dropped": {
+    "non_tech": 90252,
+    "duplicates": 1815,
+    "excluded_employment_type": 123,
+    "zero_skill": 13198
+  },
+  "coverage_pct": {
+    "salary_min": 29.9,
+    "education_required": 55.2,
+    "min_years_exp": 89.5,
+    "work_setting_known": 100.0,
+    "skills_desc": 1.5
+  },
+  "skills": {
+    "pct_with_required_section": 49.4,
+    "pct_with_preferred_section": 19.1,
+    "pct_with_preferred_skills": 6.6,
+    "median_required_skills": 3,
+    "pct_with_one_required_skill": 27.6
+  },
+  "salary_source": {
+    "none": 12933,
+    "normalized_salary": 5527,
+    "non_usd": 1
+  },
+  "min_years_exp_source": {
+    "description_regex": 11874,
+    "seniority_label": 4645,
+    "none": 1942
+  },
+  "work_setting": {
+    "On-site": 11443,
+    "Remote": 4207,
+    "Hybrid": 2811
+  },
+  "employment_type": {
+    "Full-time": 13054,
+    "Contract": 4853,
+    "Part-time": 287,
+    "Internship": 181,
+    "Temporary": 86
+  }
+}

@@ -1,0 +1,36 @@
+# CS 5542 Challenge 1 — Job Search & Matching Application
+# Requires Python 3.10, 3.11, or 3.12. NOT 3.13 — several pins below predate 3.13's
+# release and have no prebuilt wheel for it, so pip falls back to compiling from
+# source and fails without a C/C++ toolchain (this bit a Windows install with a
+# fresh 3.13 default: pandas 2.2.3 tried to build via Meson and needed
+# vswhere.exe / Visual Studio build tools that weren't present).
+# No JVM required (DuckDB runs in-process).
+#
+# NOTE (AC-14.2): after the first successful install, regenerate exact pins with
+#   pip freeze > requirements.lock.txt
+# and commit that alongside this file.
+
+# --- Data ingestion & processing (REQ-1, REQ-12) ---
+duckdb==1.1.1
+pandas==2.2.3
+pyarrow==17.0.0
+kagglehub==1.0.2         # dataset download. NOT the `kaggle` CLI: as of 1.7.4.5 it only
+                         # accepts legacy username+key, and Kaggle now issues a single API token.
+datasets==3.0.1
+
+# --- Retrieval & matching (REQ-4, REQ-5, REQ-7, REQ-9) ---
+sentence-transformers==3.1.1
+rank-bm25==0.2.2
+geonamescache==2.0.0
+
+# --- Document parsing (REQ-3, REQ-4) ---
+pypdf==5.0.1
+
+# --- Application & visualization (REQ-3, REQ-11, REQ-12) ---
+streamlit==1.39.0
+plotly==5.24.1
+kaleido==0.2.1           # plotly static image export for the notebook's figures
+
+# --- Testing & notebooks (REQ-13) ---
+pytest==8.3.3
+jupyter==1.1.1

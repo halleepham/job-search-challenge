@@ -1,0 +1,25 @@
+profile,component,weight,top5_overlap,order_changed,jobs_replaced
+Data science master's student,required_skills,0.3,2,True,3
+Data science master's student,resume_evidence_similarity,0.17,4,True,1
+Data science master's student,experience,0.15,3,True,2
+Data science master's student,career_goals_similarity,0.13,4,True,1
+Data science master's student,location,0.08,4,True,1
+Data science master's student,preferred_skills,0.08,5,False,0
+Data science master's student,title,0.05,4,True,1
+Data science master's student,education,0.04,4,True,1
+Senior backend engineer,required_skills,0.3,1,True,4
+Senior backend engineer,resume_evidence_similarity,0.17,4,True,1
+Senior backend engineer,experience,0.15,5,False,0
+Senior backend engineer,career_goals_similarity,0.13,4,True,1
+Senior backend engineer,location,0.08,5,False,0
+Senior backend engineer,preferred_skills,0.08,5,True,0
+Senior backend engineer,title,0.05,4,True,1
+Senior backend engineer,education,0.04,4,True,1
+Information security analyst,required_skills,0.3,2,True,3
+Information security analyst,resume_evidence_similarity,0.17,5,False,0
+Information security analyst,experience,0.15,3,True,2
+Information security analyst,career_goals_similarity,0.13,5,True,0
+Information security analyst,location,0.08,5,True,0
+Information security analyst,preferred_skills,0.08,5,False,0
+Information security analyst,title,0.05,5,False,0
+Information security analyst,education,0.04,5,True,0

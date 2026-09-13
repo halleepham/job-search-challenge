@@ -1,0 +1,16 @@
+profile,rank,score,tier,title,location,matched,missing
+Data science master's student,1,88,Strong,Data Engineer,"New Jersey, United States",4,0
+Data science master's student,2,85,Strong,Data Engineer - Full Time,"Kansas City, MO",3,1
+Data science master's student,3,81,Strong,Data Scientist,"California, United States",4,5
+Data science master's student,4,81,Strong,Data Engineer,United States,3,1
+Data science master's student,5,79,Good,Data Platform Engineer,"Quincy, MA",5,6
+Senior backend engineer,1,95,Strong,Staff Backend/DevOps engineer,"Boston, MA",6,0
+Senior backend engineer,2,86,Strong,Lead Software Engineer,United States,3,1
+Senior backend engineer,3,84,Strong,GOLang Developer,United States,4,1
+Senior backend engineer,4,84,Strong,Sr Software Engineer - Infrastructure,Brazil,3,1
+Senior backend engineer,5,82,Strong,Senior Software Engineer,"Philadelphia, PA",3,1
+Information security analyst,1,81,Strong,Tier II Cyber Incident Response Analyst,"Martinsburg, WV",2,1
+Information security analyst,2,74,Good,Senior Cloud Information Systems Security Offi,"Washington, DC",3,3
+Information security analyst,3,73,Good,Information Systems Security Manager,"Baltimore, MD",3,2
+Information security analyst,4,72,Good,Associate Threat Intelligence Analyst,"Arlington, VA",1,0
+Information security analyst,5,71,Good,SVTC Technician III (SHIFT) with Security Clea,"Washington, DC",1,0

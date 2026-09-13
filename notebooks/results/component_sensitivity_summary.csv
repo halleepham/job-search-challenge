@@ -1,0 +1,9 @@
+component,weight,mean_jobs_replaced,profiles_affected,n_profiles
+required_skills,0.3,3.3333333333333335,3,3
+experience,0.15,1.3333333333333333,2,3
+education,0.04,0.6666666666666666,3,3
+career_goals_similarity,0.13,0.6666666666666666,3,3
+title,0.05,0.6666666666666666,2,3
+resume_evidence_similarity,0.17,0.6666666666666666,2,3
+location,0.08,0.3333333333333333,2,3
+preferred_skills,0.08,0.0,1,3

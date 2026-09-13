@@ -1,0 +1,46 @@
+profile,mode,k,recall,found,of
+Data science master's student,bm25,10,0.0,0,20
+Data science master's student,bm25,25,0.15,3,20
+Data science master's student,bm25,50,0.15,3,20
+Data science master's student,bm25,100,0.25,5,20
+Data science master's student,bm25,200,0.55,11,20
+Data science master's student,dense,10,0.05,1,20
+Data science master's student,dense,25,0.1,2,20
+Data science master's student,dense,50,0.35,7,20
+Data science master's student,dense,100,0.6,12,20
+Data science master's student,dense,200,0.95,19,20
+Data science master's student,hybrid,10,0.1,2,20
+Data science master's student,hybrid,25,0.25,5,20
+Data science master's student,hybrid,50,0.3,6,20
+Data science master's student,hybrid,100,0.75,15,20
+Data science master's student,hybrid,200,0.95,19,20
+Senior backend engineer,bm25,10,0.2,4,20
+Senior backend engineer,bm25,25,0.25,5,20
+Senior backend engineer,bm25,50,0.3,6,20
+Senior backend engineer,bm25,100,0.5,10,20
+Senior backend engineer,bm25,200,0.75,15,20
+Senior backend engineer,dense,10,0.1,2,20
+Senior backend engineer,dense,25,0.3,6,20
+Senior backend engineer,dense,50,0.45,9,20
+Senior backend engineer,dense,100,0.6,12,20
+Senior backend engineer,dense,200,0.9,18,20
+Senior backend engineer,hybrid,10,0.2,4,20
+Senior backend engineer,hybrid,25,0.25,5,20
+Senior backend engineer,hybrid,50,0.5,10,20
+Senior backend engineer,hybrid,100,0.9,18,20
+Senior backend engineer,hybrid,200,0.95,19,20
+Information security analyst,bm25,10,0.4,8,20
+Information security analyst,bm25,25,0.55,11,20
+Information security analyst,bm25,50,0.7,14,20
+Information security analyst,bm25,100,0.75,15,20
+Information security analyst,bm25,200,0.95,19,20
+Information security analyst,dense,10,0.35,7,20
+Information security analyst,dense,25,0.6,12,20
+Information security analyst,dense,50,0.9,18,20
+Information security analyst,dense,100,1.0,20,20
+Information security analyst,dense,200,1.0,20,20
+Information security analyst,hybrid,10,0.35,7,20
+Information security analyst,hybrid,25,0.65,13,20
+Information security analyst,hybrid,50,0.8,16,20
+Information security analyst,hybrid,100,0.95,19,20
+Information security analyst,hybrid,200,1.0,20,20
